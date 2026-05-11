@@ -40,7 +40,7 @@ function logoCategoryParts(raw) {
   return { short, full, showTip: needTruncate };
 }
 
-function LogoCategoryLabel({ raw, variant = "list" }) {
+export function LogoCategoryLabel({ raw, variant = "list" }) {
   const chip = variant === "chip";
   const { short, full, showTip } = logoCategoryParts(raw);
   const [tip, setTip] = useState(false);
@@ -160,8 +160,42 @@ function summaryFlagsWithoutAigc(flags) {
   return (flags ?? []).filter((f) => !String(f || "").trim().startsWith("AIGC unified:"));
 }
 
-function summaryFlagsAigcOnly(flags) {
-  return (flags ?? []).filter((f) => String(f || "").trim().startsWith("AIGC unified:"));
+/** True when the payload includes a completed AIGC / model branch we can rely on for the public verdict. */
+function hasUsableAigcModelResult(aigc) {
+  if (!aigc) return false;
+  const st = (aigc.status || "").toLowerCase();
+  if (new Set(["done", "completed", "success", "ok", "finished"]).has(st)) return true;
+  if (aigc.unified != null && typeof aigc.unified === "object") return true;
+  if (isKnownValue(aigc.display?.globalPrediction)) return true;
+  if (isKnownValue(aigc.display?.headline)) return true;
+  if (typeof aigc.summary?.anyModelFake === "boolean") return true;
+  if (aigc.display?.globalIsFake === true || aigc.display?.globalIsFake === false) return true;
+  return false;
+}
+
+/** Single user-facing outcome for AI / synthetic signals (no model names or raw payloads). */
+function derivePublicAiContentVerdict(analysis) {
+  if (!analysis?.hasResult) return { outcome: "no_data" };
+  const { aigc, provenance } = analysis;
+  const st = (aigc.status || "").toLowerCase();
+
+  if (st === "failed") return { outcome: "failed" };
+  if (st === "skipped") return { outcome: "skipped" };
+
+  const aigcConcern =
+    aigc.display.showAiWarning === true ||
+    aigc.display.globalIsFake === true ||
+    aigc.summary.anyModelFake === true ||
+    aigc.display.provenanceAi === true;
+
+  if (aigcConcern || provenance.aiGenerated === true) return { outcome: "flagged" };
+
+  const hasModel = hasUsableAigcModelResult(aigc);
+  const provenanceExplicitlyNotAi = provenance.aiGenerated === false;
+
+  if (!hasModel && provenanceExplicitlyNotAi) return { outcome: "uncertain" };
+
+  return { outcome: "not_flagged" };
 }
 
 function metadataStatusChipClass(status) {
@@ -324,9 +358,6 @@ function ForensicsSummary({ analysis, metadataStatus, errorMessage }) {
 
           <CollapsibleBlock title="Provenance and declared source">
             <dl>
-              <FieldRow label="AI generated (metadata)" value={displayBool(analysis.provenance.aiGenerated)} />
-              <FieldRow label="AI probability" value={analysis.provenance.aiProbability} />
-              <FieldRow label="Digital source type" value={analysis.provenance.digitalSourceType} />
               <FieldRow label="C2PA present" value={displayBool(analysis.provenance.c2paPresent)} />
             </dl>
             {analysis.provenance.flags.length ? (
@@ -414,9 +445,8 @@ function AiWarningIcon() {
   );
 }
 
-function LogosSection({ mediaKind, logoDetections, logoCountsByLabel }) {
+function LogosSection({ logoDetections, logoCountsByLabel }) {
   const totalLogos = totalLogoCount(logoDetections, logoCountsByLabel);
-  const isVideo = mediaKind === "video";
   return (
     <section className="rounded-none border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="border-b border-slate-100 pb-2 text-sm font-semibold text-slate-900">Logos</h2>
@@ -427,18 +457,8 @@ function LogosSection({ mediaKind, logoDetections, logoCountsByLabel }) {
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             <span className="font-semibold text-blue-600">{totalLogos}</span>{" "}
             {totalLogos === 1 ? "mark" : "marks"} found
-            {isVideo
-              ? " from the video pipeline."
-              : logoDetections.length
-                ? ", outlined on the image."
-                : "."}
+            {logoDetections.length ? ", outlined on the image." : "."}
           </p>
-          {isVideo ? (
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">
-              Bounding boxes are not overlaid on the video player in this view. Use the list below for categories and
-              counts.
-            </p>
-          ) : null}
           <ul className="mt-4 space-y-1.5 border-t border-slate-100 pt-4 text-sm">
             {Object.entries(logoCountsByLabel).map(([label, count]) => (
               <li
@@ -456,8 +476,7 @@ function LogosSection({ mediaKind, logoDetections, logoCountsByLabel }) {
   );
 }
 
-function OcrSection({ mediaKind, ocrLines, selectedOcrIdx, onOcrLineClick }) {
-  const isVideo = mediaKind === "video";
+function OcrSection({ ocrLines, selectedOcrIdx, onOcrLineClick }) {
   return (
     <section className="rounded-none border border-slate-200 bg-white p-5 shadow-sm">
       <details className="group">
@@ -472,9 +491,7 @@ function OcrSection({ mediaKind, ocrLines, selectedOcrIdx, onOcrLineClick }) {
           <p className="mt-3 text-sm leading-relaxed text-slate-600">No text lines were extracted yet.</p>
         ) : (
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
-            {isVideo
-              ? "Lines were extracted from the video. Timestamps and frame highlights are not shown in this view."
-              : "Select a line to show where it appears on the document."}
+            Select a line to show where it appears on the document.
           </p>
         )}
         {ocrLines.length > 0 ? (
@@ -485,18 +502,12 @@ function OcrSection({ mediaKind, ocrLines, selectedOcrIdx, onOcrLineClick }) {
                 active
                   ? "border-blue-600 bg-blue-50 text-slate-900"
                   : "border-transparent bg-white text-slate-800"
-              } ${!isVideo ? "transition-colors hover:border-slate-200 hover:bg-white" : ""}`;
+              } transition-colors hover:border-slate-200 hover:bg-white`;
               return (
                 <li key={line.idx}>
-                  {isVideo ? (
-                    <div className={rowClass}>
-                      <span className="font-medium">{line.text || "—"}</span>
-                    </div>
-                  ) : (
-                    <button type="button" onClick={() => onOcrLineClick(line.idx)} className={rowClass}>
-                      <span className="font-medium">{line.text || "—"}</span>
-                    </button>
-                  )}
+                  <button type="button" onClick={() => onOcrLineClick(line.idx)} className={rowClass}>
+                    <span className="font-medium">{line.text || "—"}</span>
+                  </button>
                 </li>
               );
             })}
@@ -507,166 +518,94 @@ function OcrSection({ mediaKind, ocrLines, selectedOcrIdx, onOcrLineClick }) {
   );
 }
 
-function VideoSourcePanel({ mediaUrl }) {
+function CheckCircleIcon() {
   return (
-    <section className="rounded-none border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="border-b border-slate-100 pb-2 text-sm font-semibold text-slate-900">Source video</h2>
-      {!mediaUrl ? (
-        <p className="mt-4 text-center text-sm leading-relaxed text-slate-600">A preview could not be loaded for this item.</p>
-      ) : (
-        <>
-          <video
-            controls
-            className="mt-4 w-full max-w-full rounded-none border border-slate-300 bg-black"
-            src={mediaUrl}
-            preload="metadata"
-          />
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
-            This layout is optimized for video: watch the source first, then review AI detection, file forensics, and
-            extracted text below. Logo and OCR overlays are not drawn on the player.
-          </p>
-        </>
-      )}
-    </section>
+    <svg className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+        clipRule="evenodd"
+      />
+    </svg>
   );
 }
 
 function AiSyntheticPanel({ analysis, metadataStatus }) {
   const status = (metadataStatus || "").toLowerCase();
   const done = status === "done";
+  const verdict = derivePublicAiContentVerdict(analysis);
 
   return (
     <section className="rounded-none border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="border-b border-slate-100 pb-2 text-sm font-semibold text-slate-900">AI and synthetic detection</h2>
+      <h2 className="border-b border-slate-100 pb-2 text-sm font-semibold text-slate-900">AI-generated content</h2>
 
       {!done ? (
         <p className="mt-4 text-sm leading-relaxed text-slate-600">
-          Remote detector and merged AI signals are shown after forensics complete.
+          An AI-generated content assessment will appear here when processing finishes.
         </p>
       ) : !analysis?.hasResult ? (
-        <p className="mt-4 text-sm leading-relaxed text-slate-600">No detector payload was returned for this run.</p>
-      ) : (
-        <div className="mt-4 space-y-4">
-          {analysis.aigc.display.showAiWarning ? (
-            <div
-              role="alert"
-              className="flex gap-3 border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950"
-            >
-              <AiWarningIcon />
-              <div className="min-w-0">
-                <p className="font-semibold text-amber-950">AI or synthetic concern</p>
-                {analysis.aigc.display.headline ? (
-                  <p className="mt-1 leading-relaxed">{analysis.aigc.display.headline}</p>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-semibold uppercase tracking-wide text-slate-500">Detector branch</span>
-            {isKnownValue(analysis.aigc.status) ? (
-              <span className="rounded-none border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-800">
-                {analysis.aigc.status}
-              </span>
-            ) : (
-              <span className="text-slate-500">Not reported</span>
-            )}
-            {analysis.aigc.display.globalPrediction ? (
-              <span className="rounded-none border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-800">
-                Global: {analysis.aigc.display.globalPrediction}
-              </span>
-            ) : null}
-            {analysis.aigc.display.globalIsFake !== null ? (
-              <span className="rounded-none border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-800">
-                Global fake: {analysis.aigc.display.globalIsFake ? "yes" : "no"}
-              </span>
-            ) : null}
-            {analysis.aigc.summary.anyModelFake !== null ? (
-              <span className="rounded-none border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-800">
-                Any model fake: {analysis.aigc.summary.anyModelFake ? "yes" : "no"}
-              </span>
-            ) : null}
+        <p className="mt-4 text-sm leading-relaxed text-slate-600">No assessment was returned for this file.</p>
+      ) : verdict.outcome === "failed" ? (
+        <div className="mt-4 border border-red-200 bg-red-50/90 p-4 text-sm text-red-950" role="alert">
+          <p className="font-semibold">Assessment unavailable</p>
+          <p className="mt-1.5 leading-relaxed text-red-900/90">
+            AI-generated content screening did not complete for this file. Use the file forensics section for other
+            signals.
+          </p>
+        </div>
+      ) : verdict.outcome === "skipped" ? (
+        <div className="mt-4 border border-slate-200 bg-slate-50/90 p-4 text-sm text-slate-800">
+          <p className="font-semibold text-slate-900">Not evaluated</p>
+          <p className="mt-1.5 leading-relaxed text-slate-600">
+            This file was not run through AI-generated content screening for this job.
+          </p>
+        </div>
+      ) : verdict.outcome === "flagged" ? (
+        <div
+          role="alert"
+          className="mt-4 flex gap-3 border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950"
+        >
+          <AiWarningIcon />
+          <div className="min-w-0">
+            <p className="font-semibold text-amber-950">Flagged as likely AI-generated or synthetic</p>
+            <p className="mt-1.5 leading-relaxed text-amber-950/95">
+              Treat authenticity and provenance with extra care for this asset.
+            </p>
           </div>
-
-          {!analysis.aigc.display.showAiWarning && analysis.aigc.display.headline ? (
-            <p className="text-sm leading-relaxed text-slate-800">{analysis.aigc.display.headline}</p>
-          ) : null}
-
-          {analysis.aigc.status === "failed" && isKnownValue(analysis.aigc.error) ? (
-            <p className="border border-red-200 bg-red-50/80 p-3 text-sm text-red-900">{analysis.aigc.error}</p>
-          ) : null}
-
-          {analysis.aigc.status === "skipped" ? (
-            <p className="text-sm leading-relaxed text-slate-600">
-              The unified detector did not run for this job. Do not treat this as a clean bill of health from AI
-              detectors; rely on the file verdict and provenance above.
+        </div>
+      ) : verdict.outcome === "not_flagged" ? (
+        <div className="mt-4 flex gap-3 border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950">
+          <CheckCircleIcon />
+          <div className="min-w-0">
+            <p className="font-semibold text-emerald-950">Not indicated as AI-generated</p>
+            <p className="mt-1.5 leading-relaxed text-emerald-950/90">
+              Screening did not report this file as AI-generated or synthetic.
             </p>
-          ) : null}
-
-          {(() => {
-            const fromSummary = analysis.aigc.summary.signals ?? [];
-            const fromFlags = summaryFlagsAigcOnly(analysis.summaryFlags);
-            const merged = [...fromFlags];
-            for (const s of fromSummary) {
-              const t = String(s || "").trim();
-              if (!t) continue;
-              if (fromFlags.some((line) => line.includes(t))) continue;
-              merged.push(t);
-            }
-            if (!merged.length) return null;
-            return (
-              <div>
-                <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Detector signals</p>
-                <div className="mt-2">
-                  <BulletFlagList items={merged} emptyText="No detector lines were reported." />
-                </div>
-              </div>
-            );
-          })()}
-
-          {analysis.aigc.display.provenanceNote ? (
-            <p className="text-xs leading-relaxed text-slate-600">
-              <span className="font-semibold text-slate-700">Provenance note: </span>
-              {analysis.aigc.display.provenanceNote}
-            </p>
-          ) : null}
-
-          {analysis.aigc.display.reasons.length ? (
-            <details className="group border border-slate-100 bg-slate-50/40">
-              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
-                <span className="inline-flex w-full items-center justify-between gap-2">
-                  <span>What triggered this? ({analysis.aigc.display.reasons.length})</span>
-                  <span className="text-xs font-normal text-slate-400 group-open:hidden">Expand</span>
-                  <span className="hidden text-xs font-normal text-slate-400 group-open:inline">Collapse</span>
-                </span>
-              </summary>
-              <ul className="border-t border-slate-100 bg-white px-3 py-3 font-mono text-xs text-slate-800">
-                {analysis.aigc.display.reasons.map((r, i) => (
-                  <li key={`${r}-${i}`} className="break-all py-0.5">
-                    {r}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-
-          {analysis.aigc.unified ? (
-            <details className="group border border-slate-100 bg-slate-50/40">
-              <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
-                <span className="inline-flex w-full items-center justify-between gap-2">
-                  <span>Expert: unified API response (JSON)</span>
-                  <span className="text-xs font-normal text-slate-400 group-open:hidden">Expand</span>
-                  <span className="hidden text-xs font-normal text-slate-400 group-open:inline">Collapse</span>
-                </span>
-              </summary>
-              <pre className="max-h-96 overflow-auto border-t border-slate-100 bg-slate-900/95 p-3 text-xs leading-relaxed text-slate-100">
-                {JSON.stringify(analysis.aigc.unified, null, 2)}
-              </pre>
-            </details>
-          ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 border border-slate-200 bg-slate-50/90 p-4 text-sm text-slate-800">
+          <p className="font-semibold text-slate-900">Inconclusive</p>
+          <p className="mt-1.5 leading-relaxed text-slate-600">
+            AI-generated content status could not be determined clearly from the available information.
+          </p>
         </div>
       )}
     </section>
+  );
+}
+
+/** Forensics + AI panels reused by the dedicated video case viewer. */
+export function CaseDetailAnalysisPanels({ metadataAnalysis, metadataStatus, errorMessage }) {
+  return (
+    <>
+      <AiSyntheticPanel analysis={metadataAnalysis} metadataStatus={metadataStatus} />
+      <ForensicsSummary
+        analysis={metadataAnalysis}
+        metadataStatus={metadataStatus}
+        errorMessage={errorMessage}
+      />
+    </>
   );
 }
 
@@ -764,7 +703,6 @@ export default function CaseResultsViewer({
       : null;
   }
 
-  const isVideo = mediaKind === "video";
   const showOverlays = mediaKind === "image" && mediaUrl && natural.w > 0 && natural.h > 0 && stagePx.w > 0;
 
   const pageHeader = (
@@ -788,51 +726,13 @@ export default function CaseResultsViewer({
       </div>
     ) : null;
 
-  if (isVideo) {
-    return (
-      <div className="flex min-h-0 w-full flex-col gap-6">
-        {pageHeader}
-        {errorBanner}
-        <VideoSourcePanel mediaUrl={mediaUrl} />
-        <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6">
-          <AiSyntheticPanel analysis={metadataAnalysis} metadataStatus={metadataStatus} />
-          <ForensicsSummary
-            analysis={metadataAnalysis}
-            metadataStatus={metadataStatus}
-            errorMessage={errorMessage}
-          />
-          <LogosSection
-            mediaKind={mediaKind}
-            logoDetections={logoDetections}
-            logoCountsByLabel={logoCountsByLabel}
-          />
-          <OcrSection
-            mediaKind={mediaKind}
-            ocrLines={ocrLines}
-            selectedOcrIdx={selectedOcrIdx}
-            onOcrLineClick={onOcrLineClick}
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-0 w-full flex-col gap-6 lg:flex-row lg:items-start">
       <div className="flex w-full min-w-0 shrink-0 flex-col gap-6 lg:max-w-xl lg:basis-[28rem]">
         {pageHeader}
         {errorBanner}
-        <LogosSection
-          mediaKind={mediaKind}
-          logoDetections={logoDetections}
-          logoCountsByLabel={logoCountsByLabel}
-        />
-        <OcrSection
-          mediaKind={mediaKind}
-          ocrLines={ocrLines}
-          selectedOcrIdx={selectedOcrIdx}
-          onOcrLineClick={onOcrLineClick}
-        />
+        <LogosSection logoDetections={logoDetections} logoCountsByLabel={logoCountsByLabel} />
+        <OcrSection ocrLines={ocrLines} selectedOcrIdx={selectedOcrIdx} onOcrLineClick={onOcrLineClick} />
         <AiSyntheticPanel analysis={metadataAnalysis} metadataStatus={metadataStatus} />
         <ForensicsSummary
           analysis={metadataAnalysis}

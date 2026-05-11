@@ -1,7 +1,14 @@
 import { notFound } from "next/navigation";
 import CaseResultsViewer from "./CaseResultsViewer";
+import CaseVideoResultsViewer from "./CaseVideoResultsViewer";
 import { getPresignedGetUrl } from "@/lib/s3";
-import { parseJobLogoResult, parseJobMetadataResult, parseJobOcrResult } from "@/lib/parseJobResults";
+import {
+  parseJobLogoResult,
+  parseJobMetadataResult,
+  parseJobOcrResult,
+  parseJobVideoLogoFrames,
+  parseJobVideoOcrTimedLines,
+} from "@/lib/parseJobResults";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
@@ -64,11 +71,29 @@ export default async function CaseDetailPage({ params }) {
   const displayTitle = basenameFromKey(job.s3_key) || "Analysis results";
   const mediaKind = mediaKindFromFilename(displayTitle);
 
-  const { detections: logoDetections, countsByLabel: logoCountsByLabel } = parseJobLogoResult(
-    job.logo_result,
-  );
-  const { lines: ocrLines } = parseJobOcrResult(job.ocr_result);
   const metadataAnalysis = parseJobMetadataResult(job.metadata_result);
+
+  if (mediaKind === "video") {
+    const { frames: logoFrames, aggregateCountsByLabel: logoAggregateCounts } = parseJobVideoLogoFrames(
+      job.logo_result,
+    );
+    const { lines: ocrTimedLines } = parseJobVideoOcrTimedLines(job.ocr_result);
+    return (
+      <CaseVideoResultsViewer
+        displayTitle={displayTitle}
+        mediaUrl={mediaUrl}
+        logoFrames={logoFrames}
+        logoAggregateCounts={logoAggregateCounts}
+        ocrTimedLines={ocrTimedLines}
+        metadataAnalysis={metadataAnalysis}
+        metadataStatus={job.metadata_status}
+        errorMessage={job.error_message}
+      />
+    );
+  }
+
+  const { detections: logoDetections, countsByLabel: logoCountsByLabel } = parseJobLogoResult(job.logo_result);
+  const { lines: ocrLines } = parseJobOcrResult(job.ocr_result);
 
   return (
     <CaseResultsViewer

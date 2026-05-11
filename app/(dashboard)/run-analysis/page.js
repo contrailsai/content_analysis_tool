@@ -508,11 +508,9 @@ export default function RunAnalysisPage() {
         >
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_-10%,rgba(37,99,235,0.12),transparent_55%)]" />
 
-          <div className="relative flex w-full flex-col items-center justify-center px-4 py-10 sm:px-8 sm:py-12">
-            <div className="cat-run-panel-in relative w-full max-w-lg rounded-none border border-slate-200/95 bg-white/95 shadow-[0_24px_48px_-20px_rgba(15,23,42,0.35)] ring-1 ring-slate-900/[0.04]">
-                <div className="absolute left-0 top-0 h-full w-1 bg-blue-600" aria-hidden />
-
-                <div className="border-b border-slate-100 px-6 py-5 pl-7 sm:px-7 sm:py-6">
+          <div className="relative flex w-full flex-col items-center justify-center px-4 py-12 sm:px-8 sm:py-16">
+            <div className="cat-run-panel-in relative w-full max-w-2xl rounded-none border border-slate-200/95 bg-white/95 shadow-[0_24px_48px_-20px_rgba(15,23,42,0.35)] ring-1 ring-slate-900/[0.04]">
+                <div className="border-b border-slate-100 px-7 py-6 sm:px-9 sm:py-8">
                   <p id="run-analysis-busy-title" className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-blue-700">
                     {submitting ? "Secure upload" : "Analysis"}
                   </p>
@@ -526,8 +524,8 @@ export default function RunAnalysisPage() {
                   </p>
                 </div>
 
-                <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-[minmax(0,1fr)_200px]">
-                  <div className="border-b border-slate-100 p-5 pl-7 sm:border-b-0 sm:border-r sm:p-6 sm:pl-7">
+                <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-[minmax(0,1fr)_minmax(200px,240px)]">
+                  <div className="border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:p-8">
                     {overlayMeta ? (
                       <dl className="space-y-2.5 text-xs text-slate-600">
                         <div>
@@ -551,13 +549,13 @@ export default function RunAnalysisPage() {
                       </dl>
                     ) : null}
                   </div>
-                  <div className="relative flex min-h-[140px] items-center justify-center bg-slate-950 p-3 sm:min-h-[200px]">
+                  <div className="relative flex min-h-[180px] items-center justify-center bg-slate-950 p-4 sm:min-h-[240px]">
                     {overlayPreview && overlayIsImage ? (
                       // eslint-disable-next-line @next/next/no-img-element -- blob preview in overlay
                       <img
                         src={overlayPreview}
                         alt=""
-                        className="max-h-[min(28vh,200px)] w-full object-contain opacity-95"
+                        className="max-h-[min(34vh,260px)] w-full object-contain opacity-95"
                       />
                     ) : null}
                     {overlayPreview && overlayIsVideo ? (
@@ -565,7 +563,7 @@ export default function RunAnalysisPage() {
                         src={overlayPreview}
                         controls
                         playsInline
-                        className="max-h-[min(28vh,200px)] w-full object-contain"
+                        className="max-h-[min(34vh,260px)] w-full object-contain"
                         preload="metadata"
                       />
                     ) : null}
@@ -575,7 +573,7 @@ export default function RunAnalysisPage() {
                   </div>
                 </div>
 
-                <div className="px-6 py-5 pl-7 sm:px-7 sm:py-6">
+                <div className="px-7 py-6 sm:px-9 sm:py-8">
                   {tracking && trackingJobId ? (
                     <>
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -646,7 +644,7 @@ export default function RunAnalysisPage() {
               </div>
 
             {status && !error ? (
-              <p className="mt-6 max-w-lg text-center text-xs text-slate-500">{status}</p>
+              <p className="mt-6 max-w-2xl text-center text-xs text-slate-500">{status}</p>
             ) : null}
           </div>
         </div>
