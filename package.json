@@ -1,0 +1,27 @@
+{
+  "name": "cat-ui",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "@aws-sdk/client-sqs": "^3.758.0",
+    "@aws-sdk/s3-request-presigner": "^3.1045.0",
+    "@supabase/supabase-js": "^2.49.1",
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@tailwindcss/postcss": "^4.0.14",
+    "eslint": "^9.22.0",
+    "eslint-config-next": "^15.2.4",
+    "tailwindcss": "^4.0.14"
+  }
+}

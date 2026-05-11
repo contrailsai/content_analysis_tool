@@ -1,0 +1,16 @@
+[
+    {
+        "idx": 1,
+        "id": "e1a119a0-482f-42c0-a725-c648b74815e3",
+        "s3_key": "uploads/e1a119a0-482f-42c0-a725-c648b74815e3/document.jpg",
+        "overall_status": "completed",
+        "download_status": "done",
+        "logo_status": "done",
+        "ocr_status": "done",
+        "logo_result": "{\"params\": {\"nms\": 0.1, \"class_names\": [\"icici_correct_logos\", \"icici_impersonation_logos\", \"other_bank_logos\"], \"owl_threshold\": 0.8, \"owlv2_model_id\": \"google/owlv2-base-patch16-ensemble\", \"classifier_enabled\": true}, \"detections\": [{\"box\": [9.649748802185059, -0.2024364471435547, 140.53915405273438, 135.8729705810547], \"owl_score\": 0.9999988675117493, \"crop_index\": 0, \"classification\": {\"label\": \"other_bank_logos\", \"confidence\": 0.9647179245948792}}, {\"box\": [305.1253662109375, 43.87004089355469, 361.050048828125, 134.4269256591797], \"owl_score\": 0.8717277646064758, \"crop_index\": 1, \"classification\": {\"label\": \"other_bank_logos\", \"confidence\": 0.9882064461708069}}], \"classifications\": [{\"label\": \"other_bank_logos\", \"confidence\": 0.9647179245948792, \"crop_index\": 0}, {\"label\": \"other_bank_logos\", \"confidence\": 0.9882064461708069, \"crop_index\": 1}]}",
+        "ocr_result": "{\"lines\": [{\"bbox\": [[51.0, 30.0], [91.0, 30.0], [91.0, 59.0], [51.0, 59.0]], \"text\": \"Jio\", \"confidence\": 0.9966453909873962}, {\"bbox\": [[328.0, 61.0], [361.0, 61.0], [361.0, 86.0], [328.0, 86.0]], \"text\": \"W\", \"confidence\": 0.7778214812278748}, {\"bbox\": [[29.0, 74.0], [113.0, 70.0], [114.0, 92.0], [31.0, 96.0]], \"text\": \"WORLD\", \"confidence\": 0.9999139904975891}, {\"bbox\": [[35.0, 96.0], [112.0, 92.0], [113.0, 114.0], [37.0, 118.0]], \"text\": \"PLAZA\", \"confidence\": 0.9995397329330444}, {\"bbox\": [[335.0, 87.0], [361.0, 87.0], [361.0, 110.0], [335.0, 110.0]], \"text\": \"PL\", \"confidence\": 0.8959895372390747}], \"engine\": \"paddle_predict\", \"full_text\": \"Jio W WORLD PLAZA PL\"}",
+        "error_message": null,
+        "created_at": "2026-05-11 13:45:56.380988+00",
+        "updated_at": "2026-05-11 13:45:59.907664+00"
+    }
+]
