@@ -160,6 +160,19 @@ function summaryFlagsWithoutAigc(flags) {
   return (flags ?? []).filter((f) => !String(f || "").trim().startsWith("AIGC unified:"));
 }
 
+/** Hide forensics verdict when it is only a neutral / metadata-only placeholder. */
+function shouldShowForensicsVerdict(conclusion) {
+  if (!isKnownValue(conclusion)) return false;
+  const s = String(conclusion).trim().toLowerCase();
+  if (s.includes("metadata-only")) return false;
+  if (s.includes("inconclusive") && s.includes("neutral")) return false;
+  return true;
+}
+
+function hasForensicsSummaryFlags(analysis) {
+  return summaryFlagsWithoutAigc(analysis?.summaryFlags).some(isKnownValue);
+}
+
 /** True when the payload includes a completed AIGC / model branch we can rely on for the public verdict. */
 function hasUsableAigcModelResult(aigc) {
   if (!aigc) return false;
@@ -252,6 +265,9 @@ function CollapsibleBlock({ title, children }) {
 function ForensicsSummary({ analysis, metadataStatus, errorMessage }) {
   const status = (metadataStatus || "").toLowerCase();
   const done = status === "done";
+  const showVerdictBlock = done && analysis?.hasResult && shouldShowForensicsVerdict(analysis.conclusion);
+  const showSummaryFlagsBlock = done && analysis?.hasResult && hasForensicsSummaryFlags(analysis);
+  const showVerdictOrFlagsCard = showVerdictBlock || showSummaryFlagsBlock;
 
   return (
     <section className="rounded-none border border-slate-200 bg-white p-5 shadow-sm">
@@ -287,21 +303,29 @@ function ForensicsSummary({ analysis, metadataStatus, errorMessage }) {
         </p>
       ) : (
         <>
-          <div className="mt-4 border border-slate-100 bg-slate-50/70 p-4">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-slate-500">Verdict</p>
-            <p className="mt-1.5 text-lg font-semibold tracking-tight text-slate-900">
-              {displayValue(analysis.conclusion) || "—"}
-            </p>
-            <div className="mt-4">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Summary flags</p>
-              <div className="mt-2">
-                <BulletFlagList
-                  items={summaryFlagsWithoutAigc(analysis.summaryFlags)}
-                  emptyText="No major flags were reported for this file."
-                />
-              </div>
+          {showVerdictOrFlagsCard ? (
+            <div className="mt-4 border border-slate-100 bg-slate-50/70 p-4">
+              {showVerdictBlock ? (
+                <>
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-slate-500">Verdict</p>
+                  <p className="mt-1.5 text-lg font-semibold tracking-tight text-slate-900">
+                    {displayValue(analysis.conclusion)}
+                  </p>
+                </>
+              ) : null}
+              {showSummaryFlagsBlock ? (
+                <div className={showVerdictBlock ? "mt-4" : ""}>
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Summary flags</p>
+                  <div className="mt-2">
+                    <BulletFlagList
+                      items={summaryFlagsWithoutAigc(analysis.summaryFlags)}
+                      emptyText="No major flags were reported for this file."
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
-          </div>
+          ) : null}
 
           <div className="mt-4 space-y-2">
           <CollapsibleBlock title="Analyzed file">

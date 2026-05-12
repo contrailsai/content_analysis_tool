@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CaseDetailAnalysisPanels, LogoCategoryLabel } from "./CaseResultsViewer";
 import {
   boxToPercentStyle,
@@ -33,6 +33,20 @@ function totalLogoCount(detections, countsByLabel) {
 
 function timesClose(a, b, eps = 1e-3) {
   return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < eps;
+}
+
+/** Letterboxed `object-fit: contain` rect: map from stage pixels to inner video content area. */
+function videoContainInnerRect(stageW, stageH, naturalW, naturalH) {
+  if (stageW <= 0 || stageH <= 0) return null;
+  if (!(naturalW > 0 && naturalH > 0)) {
+    return { left: 0, top: 0, width: stageW, height: stageH };
+  }
+  const scale = Math.min(stageW / naturalW, stageH / naturalH);
+  const width = naturalW * scale;
+  const height = naturalH * scale;
+  const left = (stageW - width) / 2;
+  const top = (stageH - height) / 2;
+  return { left, top, width, height };
 }
 
 function DetailChevron() {
@@ -78,9 +92,11 @@ export default function CaseVideoResultsViewer({
   errorMessage,
 }) {
   const videoRef = useRef(null);
+  const stageRef = useRef(null);
   const trackRef = useRef(null);
   const draggingRef = useRef(false);
 
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
   const [duration, setDuration] = useState(0);
   const [currentSec, setCurrentSec] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -115,6 +131,30 @@ export default function CaseVideoResultsViewer({
   const nw = natural.w;
   const nh = natural.h;
   const showOverlays = Boolean(mediaUrl && nw > 0 && nh > 0);
+
+  const innerVideoRect = useMemo(
+    () => videoContainInnerRect(stageSize.w, stageSize.h, nw, nh),
+    [stageSize.w, stageSize.h, nw, nh],
+  );
+
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el) return undefined;
+
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setStageSize({ w: r.width, h: r.height });
+    };
+
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [mediaUrl, nw, nh]);
 
   const seekToRatio = useCallback(
     (ratio) => {
@@ -339,55 +379,77 @@ export default function CaseVideoResultsViewer({
       ) : (
         <>
           <div className="border-b border-slate-900 bg-slate-950 p-2 sm:p-3">
-            <div className="relative overflow-hidden border border-slate-700 bg-black">
-              <video
-                ref={videoRef}
-                className="block max-h-[min(78vh,920px)] w-full"
-                src={mediaUrl}
-                preload="metadata"
-                playsInline
-                onLoadedMetadata={onVideoLoadedMetadata}
-              />
-              {showOverlays ? (
-                <div className="pointer-events-none absolute inset-0">
-                  {activeLogoFrame?.detections?.map((d, i) => {
-                    if (!d.box || d.box.length < 4) return null;
-                    const expanded = expandBoxFromCenter(d.box, nw, nh, LOGO_BOX_SCALE) || d.box;
-                    const st = boxToPercentStyle(expanded, nw, nh);
-                    if (!st) return null;
-                    return (
-                      <div key={`logo-${i}`} className="absolute" style={st}>
-                        <span className="pointer-events-auto absolute bottom-full left-0 z-10 mb-1 h-fit bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">
-                          <LogoCategoryLabel raw={d.label} variant="chip" />
-                        </span>
-                        <div className="absolute inset-0 border-2 border-blue-500 bg-blue-500/10" />
-                      </div>
-                    );
-                  })}
-                  {activeOcrLines.map((line) => {
-                    const raw = line.bbox ? quadToAxisAlignedBox(line.bbox) : null;
-                    const expanded = raw ? expandBoxFromCenter(raw, nw, nh, OCR_BOX_SCALE) || raw : null;
-                    const st = expanded ? boxToPercentStyle(expanded, nw, nh) : null;
-                    if (!st) return null;
-                    const isSel = selectedOcrIdx === line.idx;
-                    return (
-                      <div
-                        key={`ocr-${line.idx}`}
-                        className={`absolute ${isSel ? "z-20" : "z-[11]"}`}
-                        style={st}
-                      >
+            <div
+              ref={stageRef}
+              className="relative w-full overflow-hidden border border-slate-700 bg-black max-h-[min(78vh,920px)]"
+              style={
+                nw > 0 && nh > 0
+                  ? { aspectRatio: `${nw} / ${nh}` }
+                  : { minHeight: "12rem" }
+              }
+            >
+              <div
+                className="absolute z-0"
+                style={
+                  innerVideoRect && innerVideoRect.width > 0 && innerVideoRect.height > 0
+                    ? {
+                        left: innerVideoRect.left,
+                        top: innerVideoRect.top,
+                        width: innerVideoRect.width,
+                        height: innerVideoRect.height,
+                      }
+                    : { inset: 0 }
+                }
+              >
+                <video
+                  ref={videoRef}
+                  className="block h-full w-full object-contain"
+                  src={mediaUrl}
+                  preload="metadata"
+                  playsInline
+                  onLoadedMetadata={onVideoLoadedMetadata}
+                />
+                {showOverlays ? (
+                  <div className="pointer-events-none absolute inset-0">
+                    {activeLogoFrame?.detections?.map((d, i) => {
+                      if (!d.box || d.box.length < 4) return null;
+                      const expanded = expandBoxFromCenter(d.box, nw, nh, LOGO_BOX_SCALE) || d.box;
+                      const st = boxToPercentStyle(expanded, nw, nh);
+                      if (!st) return null;
+                      return (
+                        <div key={`logo-${i}`} className="absolute" style={st}>
+                          <span className="pointer-events-auto absolute bottom-full left-0 z-10 mb-1 h-fit bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">
+                            <LogoCategoryLabel raw={d.label} variant="chip" />
+                          </span>
+                          <div className="absolute inset-0 border-2 border-blue-500 bg-blue-500/10" />
+                        </div>
+                      );
+                    })}
+                    {activeOcrLines.map((line) => {
+                      const raw = line.bbox ? quadToAxisAlignedBox(line.bbox) : null;
+                      const expanded = raw ? expandBoxFromCenter(raw, nw, nh, OCR_BOX_SCALE) || raw : null;
+                      const st = expanded ? boxToPercentStyle(expanded, nw, nh) : null;
+                      if (!st) return null;
+                      const isSel = selectedOcrIdx === line.idx;
+                      return (
                         <div
-                          className={`absolute inset-0 ${
-                            isSel
-                              ? "border-2 border-amber-500 bg-amber-400/25"
-                              : "border border-amber-500 bg-amber-400/10"
-                          }`}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
+                          key={`ocr-${line.idx}`}
+                          className={`absolute ${isSel ? "z-20" : "z-[11]"}`}
+                          style={st}
+                        >
+                          <div
+                            className={`absolute inset-0 ${
+                              isSel
+                                ? "border-2 border-amber-500 bg-amber-400/25"
+                                : "border border-amber-500 bg-amber-400/10"
+                            }`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
             </div>
             {!nw ? (
               <p className={`mt-2 text-center text-[11px] text-slate-500 ${mono}`}>Loading frame dimensions…</p>
