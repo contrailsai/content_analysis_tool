@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatLocalDateTimeWithOffset } from "@/lib/formatLocalDateTime";
 
 const ACCEPT = "image/*,video/*";
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -23,10 +24,7 @@ function formatBytes(n) {
 function formatLastModified(ms) {
   if (typeof ms !== "number" || Number.isNaN(ms)) return "—";
   try {
-    return new Date(ms).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
+    return formatLocalDateTimeWithOffset(ms);
   } catch {
     return "—";
   }

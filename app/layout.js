@@ -6,9 +6,27 @@ const inter = Inter({
   display: "swap",
 });
 
+const catDescription =
+  "CAT (Content Analysis Toolkit) — in-depth technical analysis on images, video, and other media: logos, on-screen text, and rich file metadata.";
+
 export const metadata = {
-  title: "CAT Analysis — Demo",
-  description: "Confidential analysis workflow demo",
+  applicationName: "CAT",
+  title: {
+    default: "CAT — Content Analysis Toolkit",
+    template: "%s | CAT",
+  },
+  description: catDescription,
+  openGraph: {
+    title: "CAT — Content Analysis Toolkit",
+    description: catDescription,
+    siteName: "CAT",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "CAT — Content Analysis Toolkit",
+    description: catDescription,
+  },
 };
 
 export default function RootLayout({ children }) {

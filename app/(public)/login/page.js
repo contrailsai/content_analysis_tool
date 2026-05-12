@@ -37,8 +37,13 @@ export default function LoginPage() {
     <div className="flex min-h-dvh flex-col items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md rounded-none border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-8 border-b border-slate-200 pb-6 text-center">
-          <h1 className="text-xl font-semibold tracking-tight text-blue-600">CAT Analysis</h1>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">Sign in to continue to the demo workspace.</p>
+          <h1 className="text-xl font-semibold tracking-tight text-blue-600">CAT</h1>
+          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+            Content Analysis Toolkit
+          </p>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            Sign in to open the workspace and review media analysis.
+          </p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <div>

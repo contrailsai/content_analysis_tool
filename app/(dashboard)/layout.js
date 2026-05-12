@@ -5,9 +5,11 @@ export default function DashboardLayout({ children }) {
     <div className="flex min-h-dvh flex-col">
       <header className="border-b border-slate-300 bg-white">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-lg font-semibold tracking-tight text-blue-600">CAT Analysis</span>
-            <span className="text-xs font-medium text-slate-500">Demo</span>
+          <div className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
+            <span className="text-lg font-semibold tracking-tight text-blue-600">CAT</span>
+            <span className="truncate text-xs font-medium text-slate-500">
+              Content Analysis Toolkit
+            </span>
           </div>
           <nav className="flex flex-wrap items-center gap-2 text-sm">
             <Link

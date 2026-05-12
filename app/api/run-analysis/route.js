@@ -7,7 +7,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 
-/** Match Python: {key_prefix}/{job_id}/document{ext} (default prefix test-runs in script; we use env or uploads). */
+/** `{prefix}/{job_id}/{stem}{ext}` — stem is ASCII-safe; job_id keeps keys unique. */
 function keyPrefix() {
   return (process.env.CAT_S3_KEY_PREFIX || "uploads").replace(/^\/+|\/+$/g, "");
 }
@@ -17,9 +17,26 @@ function extFromFilename(name) {
   return m ? `.${m[1].toLowerCase()}` : ".jpg";
 }
 
-function buildS3Key(jobId, originalFilename) {
-  const ext = extFromFilename(originalFilename);
-  return `${keyPrefix()}/${jobId}/document${ext}`;
+const STEM_SEGMENT_MAX = 140;
+
+/** Collapse odd characters for the S3 path segment (whitespace already normalized upstream). */
+function slugStemForObjectKey(stem) {
+  const s = String(stem || "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/^_|_$/g, "");
+  const clipped = s.slice(0, STEM_SEGMENT_MAX);
+  return clipped || "file";
+}
+
+function buildS3Key(jobId, sanitizedFilename) {
+  const ext = extFromFilename(sanitizedFilename);
+  const lower = sanitizedFilename.toLowerCase();
+  const extLower = ext.toLowerCase();
+  const rawStem = lower.endsWith(extLower) ? sanitizedFilename.slice(0, -ext.length) : sanitizedFilename;
+  const stem = slugStemForObjectKey(rawStem);
+  return `${keyPrefix()}/${jobId}/${stem}${ext}`;
 }
 
 function sanitizeFilename(name) {

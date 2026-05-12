@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import ClientLocalDateTime from "./ClientLocalDateTime";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: "Cases",
+  description:
+    "Workqueue of media analysis jobs in CAT (Content Analysis Toolkit): logos, on-screen text, and technical metadata.",
+};
 
 function statusMeta(overall) {
   const s = (overall || "").toLowerCase();
@@ -287,13 +294,8 @@ export default async function CasesPage() {
                           {meta.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 tabular-nums text-slate-700">
-                        {job.created_at
-                          ? new Date(job.created_at).toLocaleString(undefined, {
-                              dateStyle: "medium",
-                              timeStyle: "short",
-                            })
-                          : "—"}
+                      <td className="px-4 py-3 text-slate-700">
+                        <ClientLocalDateTime iso={job.created_at} />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <Link
