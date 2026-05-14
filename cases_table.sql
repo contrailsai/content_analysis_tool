@@ -1,6 +1,7 @@
 create table public.cat_analysis_jobs (
   id uuid not null default gen_random_uuid (),
-  s3_key text not null,
+  s3_key text null,
+  source_url text null,
   overall_status text not null default 'queued'::text,
   download_status text not null default 'pending'::text,
   logo_status text not null default 'pending'::text,

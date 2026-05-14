@@ -73,6 +73,14 @@ function statusChipClass(status) {
   return "border-slate-200 bg-white text-slate-700";
 }
 
+function safeUrlHostname(urlString) {
+  try {
+    return new URL(urlString).hostname || "";
+  } catch {
+    return "";
+  }
+}
+
 /** Snapshot of the file for overlay + multipart parity fields (validated on server). */
 function appendFileWithMetadata(formData, f) {
   formData.append("file", f, f.name);
@@ -102,17 +110,38 @@ export default function RunAnalysisPage() {
   const [jobSnapshot, setJobSnapshot] = useState(null);
   /** Locked after successful upload: preview blob + exact client metadata for overlay while polling. */
   const [uploadSession, setUploadSession] = useState(null);
+  /** Set when submitting or tracking a URL-sourced job (overlay metadata). */
+  const [linkSession, setLinkSession] = useState(null);
+  const [ingestMode, setIngestMode] = useState("file");
+  const [sourceUrlInput, setSourceUrlInput] = useState("");
 
   const tracking = Boolean(trackingJobId);
   const busy = submitting || tracking;
 
-  const clearUploadSession = useCallback(() => {
+  const clearRunSessions = useCallback(() => {
     if (sessionPreviewRef.current) {
       URL.revokeObjectURL(sessionPreviewRef.current);
       sessionPreviewRef.current = null;
     }
     setUploadSession(null);
+    setLinkSession(null);
   }, []);
+
+  const switchIngestMode = useCallback(
+    (mode) => {
+      if (busy) return;
+      setIngestMode(mode);
+      setError("");
+      setStatus("");
+      if (mode === "link") {
+        setFile(null);
+      }
+      if (mode === "file") {
+        setSourceUrlInput("");
+      }
+    },
+    [busy],
+  );
 
   useEffect(() => {
     if (!file) {
@@ -141,7 +170,7 @@ export default function RunAnalysisPage() {
         setError("Analysis is taking longer than expected. Open Cases to check progress.");
         setTrackingJobId(null);
         setStatus("");
-        clearUploadSession();
+        clearRunSessions();
         router.refresh();
         return;
       }
@@ -158,7 +187,7 @@ export default function RunAnalysisPage() {
           setError(data.error || "Could not load job status.");
           setTrackingJobId(null);
           setStatus("");
-          clearUploadSession();
+          clearRunSessions();
           router.refresh();
           return;
         }
@@ -173,11 +202,20 @@ export default function RunAnalysisPage() {
           metadata_status: job.metadata_status,
         });
 
+        if (job.download_status === "failed") {
+          setError(job.error_message || "Download or URL ingest failed.");
+          setTrackingJobId(null);
+          setStatus("");
+          clearRunSessions();
+          router.refresh();
+          return;
+        }
+
         if (job.overall_status === "failed") {
           setError(job.error_message || "Analysis failed.");
           setTrackingJobId(null);
           setStatus("");
-          clearUploadSession();
+          clearRunSessions();
           router.refresh();
           return;
         }
@@ -199,7 +237,7 @@ export default function RunAnalysisPage() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [trackingJobId, router, clearUploadSession]);
+  }, [trackingJobId, router, clearRunSessions]);
 
   useEffect(() => {
     return () => {
@@ -303,6 +341,7 @@ export default function RunAnalysisPage() {
         setError("Missing job id from server.");
         return;
       }
+      setLinkSession(null);
       if (sessionPreviewRef.current) {
         URL.revokeObjectURL(sessionPreviewRef.current);
         sessionPreviewRef.current = null;
@@ -327,13 +366,55 @@ export default function RunAnalysisPage() {
     }
   }
 
+  async function onSubmitLink(e) {
+    e.preventDefault();
+    setError("");
+    setStatus("");
+    const trimmed = sourceUrlInput.trim();
+    if (!trimmed) {
+      setError("Paste a video or media URL (https://…).");
+      return;
+    }
+    setLinkSession({ sourceUrl: trimmed });
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/analysis/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_url: trimmed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLinkSession(null);
+        setError(data.error || "Something went wrong. Please try again.");
+        return;
+      }
+      const jobId = data.job_id;
+      if (!jobId || typeof jobId !== "string") {
+        setLinkSession(null);
+        setError("Missing job id from server.");
+        return;
+      }
+      setUploadSession(null);
+      setStatus("Queued for analysis…");
+      setTrackingJobId(jobId);
+      router.refresh();
+    } catch {
+      setLinkSession(null);
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const isVideo = file?.type?.startsWith("video/");
   const isImage = file?.type?.startsWith("image/");
-  const overlayMeta = uploadSession ?? (file ? { name: file.name, size: file.size, mime: file.type || "", lastModified: file.lastModified } : null);
+  const fileOverlayMeta = uploadSession ?? (file ? { name: file.name, size: file.size, mime: file.type || "", lastModified: file.lastModified } : null);
   const overlayPreview = uploadSession?.previewUrl ?? previewUrl;
   const overlayMime = uploadSession?.mime || file?.type || "";
   const overlayIsVideo = overlayMime.startsWith("video/");
   const overlayIsImage = overlayMime.startsWith("image/");
+  const linkHostname = linkSession ? safeUrlHostname(linkSession.sourceUrl) : "";
 
   const steps = jobSnapshot
     ? [
@@ -356,9 +437,44 @@ export default function RunAnalysisPage() {
               New analysis
             </h1>
             <p className="mt-4 max-w-xl text-[0.9375rem] leading-relaxed text-slate-600">
-              Upload image or video for logo, on-screen text, and metadata review. One file per submission—no extra setup.
+              Upload a file or paste a single media URL (YouTube, TikTok, and other sources your deployment supports).
+              One submission at a time—logo, on-screen text, and metadata run on the same pipeline.
             </p>
 
+            <div
+              className="mt-8 flex rounded-none border border-slate-200 bg-slate-50 p-1"
+              role="tablist"
+              aria-label="Ingest source"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={ingestMode === "file"}
+                onClick={() => switchIngestMode("file")}
+                className={`min-h-[44px] flex-1 rounded-none px-4 text-sm font-semibold transition-colors ${
+                  ingestMode === "file"
+                    ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
+                    : "border border-transparent text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Upload file
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={ingestMode === "link"}
+                onClick={() => switchIngestMode("link")}
+                className={`min-h-[44px] flex-1 rounded-none px-4 text-sm font-semibold transition-colors ${
+                  ingestMode === "link"
+                    ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
+                    : "border border-transparent text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Paste link
+              </button>
+            </div>
+
+            {ingestMode === "file" ? (
             <form onSubmit={onSubmit} className="mt-10 space-y-6">
               <input
                 id="run-analysis-file"
@@ -493,6 +609,46 @@ export default function RunAnalysisPage() {
                 </button>
               </div>
             </form>
+            ) : (
+            <form onSubmit={onSubmitLink} className="mt-10 space-y-6">
+              <div>
+                <label htmlFor="run-analysis-source-url" className="text-sm font-semibold text-slate-800">
+                  Media URL
+                </label>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Paste one <span className="font-mono">http</span> or <span className="font-mono">https</span> link.
+                  The server queues the job and downloads the media for analysis.
+                </p>
+                <input
+                  id="run-analysis-source-url"
+                  type="url"
+                  name="source_url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="https://…"
+                  value={sourceUrlInput}
+                  onChange={(e) => setSourceUrlInput(e.target.value)}
+                  className="mt-3 w-full rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              {error ? (
+                <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap gap-3 pt-1">
+                <button
+                  type="submit"
+                  disabled={submitting || !sourceUrlInput.trim()}
+                  className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
+                >
+                  {submitting ? "Submitting…" : "Submit link for analysis"}
+                </button>
+              </div>
+            </form>
+            )}
         </div>
       </div>
 
@@ -510,39 +666,58 @@ export default function RunAnalysisPage() {
             <div className="cat-run-panel-in relative w-full max-w-2xl rounded-none border border-slate-200/95 bg-white/95 shadow-[0_24px_48px_-20px_rgba(15,23,42,0.35)] ring-1 ring-slate-900/[0.04]">
                 <div className="border-b border-slate-100 px-7 py-6 sm:px-9 sm:py-8">
                   <p id="run-analysis-busy-title" className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-blue-700">
-                    {submitting ? "Secure upload" : "Analysis"}
+                    {submitting ? (linkSession ? "Queueing job" : "Secure upload") : "Analysis"}
                   </p>
                   <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-                    {submitting ? "Sending your media" : "Running your pipeline"}
+                    {submitting
+                      ? linkSession
+                        ? "Registering your URL"
+                        : "Sending your media"
+                      : "Running your pipeline"}
                   </h2>
                   <p id="run-analysis-busy-desc" className="mt-2 text-sm leading-relaxed text-slate-600">
                     {submitting
-                      ? "Preserving original filename, type, and timestamps end-to-end."
+                      ? linkSession
+                        ? "Creating the job record and enqueueing the worker to fetch and store the remote media."
+                        : "Preserving original filename, type, and timestamps end-to-end."
                       : "We will open results as soon as download, logo, OCR, and metadata stages finish."}
                   </p>
                 </div>
 
                 <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-[minmax(0,1fr)_minmax(200px,240px)]">
                   <div className="border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:p-8">
-                    {overlayMeta ? (
+                    {linkSession ? (
+                      <dl className="space-y-2.5 text-xs text-slate-600">
+                        <div>
+                          <dt className="font-semibold uppercase tracking-wide text-slate-500">Source URL</dt>
+                          <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{linkSession.sourceUrl}</dd>
+                        </div>
+                        {linkHostname ? (
+                          <div>
+                            <dt className="font-semibold uppercase tracking-wide text-slate-500">Host</dt>
+                            <dd className="mt-0.5 font-mono text-[0.8rem] text-slate-900">{linkHostname}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    ) : fileOverlayMeta ? (
                       <dl className="space-y-2.5 text-xs text-slate-600">
                         <div>
                           <dt className="font-semibold uppercase tracking-wide text-slate-500">File name</dt>
-                          <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{overlayMeta.name}</dd>
+                          <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{fileOverlayMeta.name}</dd>
                         </div>
                         <div className="flex flex-wrap gap-x-6 gap-y-2">
                           <div>
                             <dt className="font-semibold uppercase tracking-wide text-slate-500">Size</dt>
-                            <dd className="mt-0.5 tabular-nums text-slate-900">{formatBytes(overlayMeta.size)}</dd>
+                            <dd className="mt-0.5 tabular-nums text-slate-900">{formatBytes(fileOverlayMeta.size)}</dd>
                           </div>
                           <div>
                             <dt className="font-semibold uppercase tracking-wide text-slate-500">MIME</dt>
-                            <dd className="mt-0.5 break-all font-mono text-[0.75rem] text-slate-900">{overlayMeta.mime || "—"}</dd>
+                            <dd className="mt-0.5 break-all font-mono text-[0.75rem] text-slate-900">{fileOverlayMeta.mime || "—"}</dd>
                           </div>
                         </div>
                         <div>
                           <dt className="font-semibold uppercase tracking-wide text-slate-500">Last modified</dt>
-                          <dd className="mt-0.5 tabular-nums text-slate-900">{formatLastModified(overlayMeta.lastModified)}</dd>
+                          <dd className="mt-0.5 tabular-nums text-slate-900">{formatLastModified(fileOverlayMeta.lastModified)}</dd>
                         </div>
                       </dl>
                     ) : null}
@@ -565,7 +740,26 @@ export default function RunAnalysisPage() {
                         preload="metadata"
                       />
                     ) : null}
-                    {submitting && !overlayPreview ? (
+                    {linkSession && !overlayPreview && submitting ? (
+                      <div className="h-16 w-16 rounded-none border-2 border-blue-200 border-t-blue-600 motion-safe:animate-spin" aria-hidden />
+                    ) : null}
+                    {linkSession && !overlayPreview && tracking ? (
+                      <div className="flex max-w-[220px] flex-col items-center gap-3 px-2 text-center">
+                        <svg className="h-10 w-10 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25} aria-hidden>
+                          <path strokeLinecap="square" strokeLinejoin="miter" d="M13.5 6H5v12h14v-6M10 12l9-9m0 0v4m0-4h-4" />
+                        </svg>
+                        <p className="text-[0.7rem] font-medium uppercase tracking-wide text-slate-400">Remote media</p>
+                        <a
+                          href={linkSession.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-semibold text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-300"
+                        >
+                          Open source link
+                        </a>
+                      </div>
+                    ) : null}
+                    {submitting && !overlayPreview && !linkSession ? (
                       <div className="h-16 w-16 rounded-none border-2 border-blue-200 border-t-blue-600 motion-safe:animate-spin" aria-hidden />
                     ) : null}
                   </div>
@@ -631,11 +825,20 @@ export default function RunAnalysisPage() {
                     </>
                   ) : (
                     <p className="text-sm leading-relaxed text-slate-600">
-                      <span className="font-semibold text-slate-900">Uploading to server…</span>
-                      <span className="mt-2 block">
-                        Your file bytes, name, MIME type, size, and last-modified are sent together for verification on
-                        the server.
-                      </span>
+                      {linkSession ? (
+                        <>
+                          <span className="font-semibold text-slate-900">Sending your URL…</span>
+                          <span className="mt-2 block">The server validates the link, records the job, and adds it to the analysis queue.</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-900">Uploading to server…</span>
+                          <span className="mt-2 block">
+                            Your file bytes, name, MIME type, size, and last-modified are sent together for verification on
+                            the server.
+                          </span>
+                        </>
+                      )}
                     </p>
                   )}
                 </div>

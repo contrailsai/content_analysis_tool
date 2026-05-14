@@ -13,7 +13,7 @@ export async function GET(request) {
   const { data, error } = await supabase
     .from("cat_analysis_jobs")
     .select(
-      "id, s3_key, overall_status, download_status, logo_status, ocr_status, metadata_status, created_at, updated_at",
+      "id, s3_key, source_url, overall_status, download_status, logo_status, ocr_status, metadata_status, created_at, updated_at",
     )
     .order("created_at", { ascending: false })
     .limit(200);

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { basenameFromS3Key, displayJobDocumentLabel } from "@/lib/jobDisplay";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
 import ClientLocalDateTime from "./ClientLocalDateTime";
 
@@ -41,12 +42,6 @@ function statusMeta(overall) {
     dot: "bg-slate-500",
     chip: "border-slate-400 text-slate-800 bg-slate-50",
   };
-}
-
-function labelFromS3Key(key) {
-  if (!key) return "—";
-  const seg = key.split("/").filter(Boolean);
-  return seg.length ? seg[seg.length - 1] : key;
 }
 
 const IMAGE_EXTENSIONS = new Set([
@@ -155,20 +150,17 @@ export default async function CasesPage() {
   const { data: jobs, error } = await supabase
     .from("cat_analysis_jobs")
     .select(
-      "id, s3_key, overall_status, download_status, logo_status, ocr_status, metadata_status, created_at, updated_at",
+      "id, s3_key, source_url, overall_status, download_status, logo_status, ocr_status, metadata_status, created_at, updated_at",
     )
     .order("created_at", { ascending: false, nullsFirst: false })
     .order("id", { ascending: false })
     .limit(200);
 
   if (error) {
+    console.error("Supabase list failed", error);
     return (
       <div className="mx-auto max-w-5xl rounded-none border border-red-200 bg-red-50 p-6 text-sm leading-relaxed text-red-900">
-        Could not load cases. Confirm the{" "}
-        <code className="rounded-none bg-red-100 px-1.5 py-0.5 font-mono text-red-900">
-          cat_analysis_jobs
-        </code>{" "}
-        table exists and credentials are valid.
+        Could not load cases. Please try again later.
       </div>
     );
   }
@@ -268,9 +260,14 @@ export default async function CasesPage() {
               </thead>
               <tbody>
                 {rows.map((job, index) => {
-                  const docLabel = labelFromS3Key(job.s3_key);
+                  const docLabel = displayJobDocumentLabel(job);
+                  const stem = basenameFromS3Key(job.s3_key);
                   const meta = statusMeta(job.overall_status);
-                  const mediaKind = mediaKindFromFilename(docLabel);
+                  const mediaKind = stem
+                    ? mediaKindFromFilename(stem)
+                    : job.source_url
+                      ? "video"
+                      : mediaKindFromFilename(docLabel);
                   const serialNo = index + 1;
                   return (
                     <tr

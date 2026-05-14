@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import CaseResultsViewer from "./CaseResultsViewer";
 import CaseVideoResultsViewer from "./CaseVideoResultsViewer";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { basenameFromS3Key, displayJobCaseTitle } from "@/lib/jobDisplay";
 import {
   parseJobLogoResult,
   parseJobMetadataResult,
@@ -12,12 +13,6 @@ import {
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
-
-function basenameFromKey(key) {
-  if (!key) return "";
-  const parts = key.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : key;
-}
 
 function isImageName(name) {
   return /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(name || "");
@@ -68,8 +63,13 @@ export default async function CaseDetailPage({ params }) {
     mediaUrl = null;
   }
 
-  const displayTitle = basenameFromKey(job.s3_key) || "Analysis results";
-  const mediaKind = mediaKindFromFilename(displayTitle);
+  const displayTitle = displayJobCaseTitle(job);
+  const titleStem = basenameFromS3Key(job.s3_key);
+  const mediaKind = titleStem
+    ? mediaKindFromFilename(titleStem)
+    : job.source_url
+      ? "video"
+      : mediaKindFromFilename(displayTitle);
 
   const metadataAnalysis = parseJobMetadataResult(job.metadata_result);
 
