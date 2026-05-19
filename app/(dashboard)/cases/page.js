@@ -145,7 +145,10 @@ function FileTypeIndicator({ kind }) {
   );
 }
 
-export default async function CasesPage() {
+export default async function CasesPage({ searchParams }) {
+  const queuedRaw = (await searchParams)?.queued;
+  const queuedCount = typeof queuedRaw === "string" ? parseInt(queuedRaw, 10) : NaN;
+  const showQueuedBanner = Number.isFinite(queuedCount) && queuedCount > 0;
   const supabase = getSupabaseAdmin();
   const { data: jobs, error } = await supabase
     .from("cat_analysis_jobs")
@@ -197,6 +200,13 @@ export default async function CasesPage() {
           ) : null}
         </div>
       </header>
+
+      {showQueuedBanner ? (
+        <p className="rounded-none border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Queued {queuedCount} link{queuedCount === 1 ? "" : "s"} for analysis. They will appear in the list as jobs
+          are created.
+        </p>
+      ) : null}
 
       {rows.length === 0 ? (
         <div className="rounded-none border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-sm sm:px-10">

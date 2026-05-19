@@ -3,49 +3,9 @@ import { NextResponse } from "next/server";
 import { isRequestAuthorized } from "@/lib/authRequest";
 import { sendIngestionMessage } from "@/lib/sqs";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import { validateHttpUrl } from "@/lib/urlIngest";
 
 export const runtime = "nodejs";
-
-function parseAllowedHostsEnv() {
-  const raw = process.env.URL_INGEST_ALLOWED_HOSTS || "";
-  return raw
-    .split(",")
-    .map((h) => h.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function isAllowedHost(hostname, allowed) {
-  if (!allowed.length) return true;
-  const host = String(hostname || "").toLowerCase();
-  if (!host) return false;
-  return allowed.some((rule) => host === rule || host.endsWith(`.${rule}`));
-}
-
-function validateHttpUrl(trimmed) {
-  let u;
-  try {
-    u = new URL(trimmed);
-  } catch {
-    return { ok: false, error: "Invalid URL." };
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") {
-    return { ok: false, error: "Only http and https URLs are supported." };
-  }
-  if (!u.hostname) {
-    return { ok: false, error: "URL must include a hostname." };
-  }
-  const allowed = parseAllowedHostsEnv();
-  if (!isAllowedHost(u.hostname, allowed)) {
-    return {
-      ok: false,
-      error:
-        allowed.length > 0
-          ? `Hostname is not in the allowed list for URL ingest. Allowed: ${allowed.join(", ")}.`
-          : "Hostname is not allowed for URL ingest.",
-    };
-  }
-  return { ok: true, href: u.href };
-}
 
 export async function POST(request) {
   if (!(await isRequestAuthorized(request))) {

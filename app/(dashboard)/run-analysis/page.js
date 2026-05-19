@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatLocalDateTimeWithOffset } from "@/lib/formatLocalDateTime";
+import { extractHttpsUrls, MAX_BATCH_SOURCE_URLS } from "@/lib/urlIngest";
 
 const ACCEPT = "image/*,video/*";
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -113,7 +114,12 @@ export default function RunAnalysisPage() {
   /** Set when submitting or tracking a URL-sourced job (overlay metadata). */
   const [linkSession, setLinkSession] = useState(null);
   const [ingestMode, setIngestMode] = useState("file");
+  const [linkInputMode, setLinkInputMode] = useState("single");
   const [sourceUrlInput, setSourceUrlInput] = useState("");
+  const [bulkTextInput, setBulkTextInput] = useState("");
+  const [detectedUrls, setDetectedUrls] = useState([]);
+  const [bulkCsvName, setBulkCsvName] = useState("");
+  const csvInputRef = useRef(null);
 
   const tracking = Boolean(trackingJobId);
   const busy = submitting || tracking;
@@ -138,10 +144,117 @@ export default function RunAnalysisPage() {
       }
       if (mode === "file") {
         setSourceUrlInput("");
+        setBulkTextInput("");
+        setDetectedUrls([]);
+        setBulkCsvName("");
+        setLinkInputMode("single");
       }
     },
     [busy],
   );
+
+  const switchLinkInputMode = useCallback(
+    (mode) => {
+      if (busy) return;
+      setLinkInputMode(mode);
+      setError("");
+      setDetectedUrls([]);
+      setBulkCsvName("");
+      if (mode === "single") {
+        setBulkTextInput("");
+      }
+      if (mode !== "single") {
+        setSourceUrlInput("");
+      }
+    },
+    [busy],
+  );
+
+  const runUrlDetection = useCallback((text) => {
+    const urls = extractHttpsUrls(text);
+    setDetectedUrls(urls);
+    return urls;
+  }, []);
+
+  const removeDetectedUrl = useCallback((href) => {
+    setDetectedUrls((prev) => prev.filter((u) => u !== href));
+  }, []);
+
+  function onBulkTextChange(e) {
+    const next = e.target.value;
+    setBulkTextInput(next);
+    setError("");
+    runUrlDetection(next);
+  }
+
+  function onCsvInputChange(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || busy) return;
+    setError("");
+    const name = f.name || "upload.csv";
+    const lower = name.toLowerCase();
+    if (!lower.endsWith(".csv") && f.type !== "text/csv" && f.type !== "application/vnd.ms-excel") {
+      setError("Upload a .csv file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const urls = runUrlDetection(text);
+      setBulkCsvName(name);
+      setBulkTextInput("");
+      if (!urls.length) {
+        setError("No https:// links found in that file.");
+      }
+    };
+    reader.onerror = () => setError("Could not read the CSV file.");
+    reader.readAsText(f);
+  }
+
+  async function onSubmitBulkLinks(e) {
+    e.preventDefault();
+    setError("");
+    setStatus("");
+    if (!detectedUrls.length) {
+      setError(
+        linkInputMode === "csv"
+          ? "Upload a CSV with https:// links, or switch to paste mode."
+          : "Paste text containing https:// links, or upload a CSV.",
+      );
+      return;
+    }
+    if (detectedUrls.length > MAX_BATCH_SOURCE_URLS) {
+      setError(`At most ${MAX_BATCH_SOURCE_URLS} links per submission. Remove ${detectedUrls.length - MAX_BATCH_SOURCE_URLS} to continue.`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/analysis/jobs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_urls: detectedUrls }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail =
+          Array.isArray(data.validation_errors) && data.validation_errors.length
+            ? ` ${data.validation_errors[0].error}`
+            : "";
+        setError((data.error || "Something went wrong.") + detail);
+        return;
+      }
+      const count = data.queued_count ?? data.job_ids?.length ?? detectedUrls.length;
+      setBulkTextInput("");
+      setDetectedUrls([]);
+      setBulkCsvName("");
+      router.push(`/cases?queued=${count}`);
+    } catch {
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (!file) {
@@ -437,8 +550,8 @@ export default function RunAnalysisPage() {
               New analysis
             </h1>
             <p className="mt-4 max-w-xl text-[0.9375rem] leading-relaxed text-slate-600">
-              Upload a file or paste a single media URL (YouTube, TikTok, and other sources your deployment supports).
-              One submission at a time—logo, on-screen text, and metadata run on the same pipeline.
+              Upload a file, paste one media URL, or submit many links at once from free text or a CSV. Each link is
+              queued on the same logo, on-screen text, and metadata pipeline.
             </p>
 
             <div
@@ -610,44 +723,205 @@ export default function RunAnalysisPage() {
               </div>
             </form>
             ) : (
-            <form onSubmit={onSubmitLink} className="mt-10 space-y-6">
-              <div>
-                <label htmlFor="run-analysis-source-url" className="text-sm font-semibold text-slate-800">
-                  Media URL
-                </label>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  Paste one <span className="font-mono">http</span> or <span className="font-mono">https</span> link.
-                  The server queues the job and downloads the media for analysis.
-                </p>
-                <input
-                  id="run-analysis-source-url"
-                  type="url"
-                  name="source_url"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="https://…"
-                  value={sourceUrlInput}
-                  onChange={(e) => setSourceUrlInput(e.target.value)}
-                  className="mt-3 w-full rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                />
+            <div className="mt-10 space-y-6">
+              <div
+                className="flex flex-wrap gap-1 rounded-none border border-slate-200 bg-slate-50 p-1"
+                role="tablist"
+                aria-label="Link input method"
+              >
+                {[
+                  { id: "single", label: "One link" },
+                  { id: "text", label: "Paste many" },
+                  { id: "csv", label: "Upload CSV" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={linkInputMode === tab.id}
+                    onClick={() => switchLinkInputMode(tab.id)}
+                    className={`min-h-[40px] flex-1 rounded-none px-3 text-xs font-semibold transition-colors sm:text-sm ${
+                      linkInputMode === tab.id
+                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
+                        : "border border-transparent text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
 
-              {error ? (
-                <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
-                  {error}
-                </p>
-              ) : null}
+              {linkInputMode === "single" ? (
+                <form onSubmit={onSubmitLink} className="space-y-6">
+                  <div>
+                    <label htmlFor="run-analysis-source-url" className="text-sm font-semibold text-slate-800">
+                      Media URL
+                    </label>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      Paste one <span className="font-mono">http</span> or <span className="font-mono">https</span>{" "}
+                      link. The server queues the job and downloads the media for analysis.
+                    </p>
+                    <input
+                      id="run-analysis-source-url"
+                      type="url"
+                      name="source_url"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="https://…"
+                      value={sourceUrlInput}
+                      onChange={(e) => setSourceUrlInput(e.target.value)}
+                      className="mt-3 w-full rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </div>
 
-              <div className="flex flex-wrap gap-3 pt-1">
-                <button
-                  type="submit"
-                  disabled={submitting || !sourceUrlInput.trim()}
-                  className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
-                >
-                  {submitting ? "Submitting…" : "Submit link for analysis"}
-                </button>
-              </div>
-            </form>
+                  {error ? (
+                    <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
+                      {error}
+                    </p>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    <button
+                      type="submit"
+                      disabled={submitting || !sourceUrlInput.trim()}
+                      className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
+                    >
+                      {submitting ? "Submitting…" : "Submit link for analysis"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={onSubmitBulkLinks} className="space-y-6">
+                  <input
+                    ref={csvInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    aria-hidden
+                    onChange={onCsvInputChange}
+                  />
+
+                  {linkInputMode === "text" ? (
+                    <div>
+                      <label htmlFor="run-analysis-bulk-text" className="text-sm font-semibold text-slate-800">
+                        Paste links or a sheet export
+                      </label>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                        We scan for <span className="font-mono">https://</span> URLs (one per line, in paragraphs, or
+                        mixed with other text) and list them below before you submit.
+                      </p>
+                      <textarea
+                        id="run-analysis-bulk-text"
+                        rows={8}
+                        spellCheck={false}
+                        placeholder={"https://www.youtube.com/watch?v=…\nhttps://www.tiktok.com/@user/video/…"}
+                        value={bulkTextInput}
+                        onChange={onBulkTextChange}
+                        className="mt-3 w-full resize-y rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Upload a CSV</p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                        Any column may contain links—we extract every <span className="font-mono">https://</span> URL in
+                        the file (same rules as paste mode).
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => csvInputRef.current?.click()}
+                          disabled={submitting}
+                          className="rounded-none border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Choose CSV
+                        </button>
+                        {bulkCsvName ? (
+                          <span className="truncate text-xs text-slate-600" title={bulkCsvName}>
+                            {bulkCsvName}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+
+                  {detectedUrls.length > 0 ? (
+                    <div className="rounded-none border border-slate-200 bg-slate-50/80">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+                        <p className="text-sm font-semibold text-slate-800">
+                          {detectedUrls.length} link{detectedUrls.length === 1 ? "" : "s"} ready
+                          {detectedUrls.length > MAX_BATCH_SOURCE_URLS ? (
+                            <span className="ml-2 font-normal text-red-700">
+                              (max {MAX_BATCH_SOURCE_URLS} per batch)
+                            </span>
+                          ) : null}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDetectedUrls([]);
+                            setBulkTextInput("");
+                            setBulkCsvName("");
+                          }}
+                          className="text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-900"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      <ul className="max-h-56 divide-y divide-slate-200 overflow-y-auto">
+                        {detectedUrls.map((href) => (
+                          <li key={href} className="flex items-start gap-2 px-4 py-2.5">
+                            <span className="min-w-0 flex-1 break-all font-mono text-[0.75rem] text-slate-800">
+                              {href}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeDetectedUrl(href)}
+                              className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-red-700"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : linkInputMode === "text" && bulkTextInput.trim() ? (
+                    <p className="text-xs text-slate-500">No https:// links detected yet.</p>
+                  ) : null}
+
+                  {error ? (
+                    <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
+                      {error}
+                    </p>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    <button
+                      type="submit"
+                      disabled={
+                        submitting ||
+                        detectedUrls.length === 0 ||
+                        detectedUrls.length > MAX_BATCH_SOURCE_URLS
+                      }
+                      className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
+                    >
+                      {submitting
+                        ? "Queueing…"
+                        : `Submit ${detectedUrls.length || ""} link${detectedUrls.length === 1 ? "" : "s"} for analysis`}
+                    </button>
+                    {linkInputMode === "text" && bulkTextInput.trim() && !detectedUrls.length ? (
+                      <button
+                        type="button"
+                        onClick={() => runUrlDetection(bulkTextInput)}
+                        className="rounded-none border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50"
+                      >
+                        Scan again
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+              )}
+            </div>
             )}
         </div>
       </div>
