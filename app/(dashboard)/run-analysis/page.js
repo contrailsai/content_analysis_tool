@@ -82,6 +82,14 @@ function safeUrlHostname(urlString) {
   }
 }
 
+function UploadIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+      <path strokeLinecap="square" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+    </svg>
+  );
+}
+
 /** Snapshot of the file for overlay + multipart parity fields (validated on server). */
 function appendFileWithMetadata(formData, f) {
   formData.append("file", f, f.name);
@@ -114,8 +122,7 @@ export default function RunAnalysisPage() {
   /** Set when submitting or tracking a URL-sourced job (overlay metadata). */
   const [linkSession, setLinkSession] = useState(null);
   const [ingestMode, setIngestMode] = useState("file");
-  const [linkInputMode, setLinkInputMode] = useState("single");
-  const [sourceUrlInput, setSourceUrlInput] = useState("");
+  const [linkInputMode, setLinkInputMode] = useState("text");
   const [bulkTextInput, setBulkTextInput] = useState("");
   const [detectedUrls, setDetectedUrls] = useState([]);
   const [bulkCsvName, setBulkCsvName] = useState("");
@@ -143,11 +150,10 @@ export default function RunAnalysisPage() {
         setFile(null);
       }
       if (mode === "file") {
-        setSourceUrlInput("");
+        setLinkInputMode("text");
         setBulkTextInput("");
         setDetectedUrls([]);
         setBulkCsvName("");
-        setLinkInputMode("single");
       }
     },
     [busy],
@@ -160,12 +166,7 @@ export default function RunAnalysisPage() {
       setError("");
       setDetectedUrls([]);
       setBulkCsvName("");
-      if (mode === "single") {
-        setBulkTextInput("");
-      }
-      if (mode !== "single") {
-        setSourceUrlInput("");
-      }
+      setBulkTextInput("");
     },
     [busy],
   );
@@ -217,11 +218,7 @@ export default function RunAnalysisPage() {
     setError("");
     setStatus("");
     if (!detectedUrls.length) {
-      setError(
-        linkInputMode === "csv"
-          ? "Upload a CSV with https:// links, or switch to paste mode."
-          : "Paste text containing https:// links, or upload a CSV.",
-      );
+      setError("Paste or upload content with at least one https:// link.");
       return;
     }
     if (detectedUrls.length > MAX_BATCH_SOURCE_URLS) {
@@ -479,47 +476,6 @@ export default function RunAnalysisPage() {
     }
   }
 
-  async function onSubmitLink(e) {
-    e.preventDefault();
-    setError("");
-    setStatus("");
-    const trimmed = sourceUrlInput.trim();
-    if (!trimmed) {
-      setError("Paste a video or media URL (https://…).");
-      return;
-    }
-    setLinkSession({ sourceUrl: trimmed });
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/analysis/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source_url: trimmed }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setLinkSession(null);
-        setError(data.error || "Something went wrong. Please try again.");
-        return;
-      }
-      const jobId = data.job_id;
-      if (!jobId || typeof jobId !== "string") {
-        setLinkSession(null);
-        setError("Missing job id from server.");
-        return;
-      }
-      setUploadSession(null);
-      setStatus("Queued for analysis…");
-      setTrackingJobId(jobId);
-      router.refresh();
-    } catch {
-      setLinkSession(null);
-      setError("Network error. Check your connection and try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const isVideo = file?.type?.startsWith("video/");
   const isImage = file?.type?.startsWith("image/");
   const fileOverlayMeta = uploadSession ?? (file ? { name: file.name, size: file.size, mime: file.type || "", lastModified: file.lastModified } : null);
@@ -550,8 +506,8 @@ export default function RunAnalysisPage() {
               New analysis
             </h1>
             <p className="mt-4 max-w-xl text-[0.9375rem] leading-relaxed text-slate-600">
-              Upload a file, paste one media URL, or submit many links at once from free text or a CSV. Each link is
-              queued on the same logo, on-screen text, and metadata pipeline.
+              Upload a file or add video links—one or many—from pasted text or a CSV. Each link runs through the same
+              logo, on-screen text, and metadata pipeline.
             </p>
 
             <div
@@ -583,7 +539,7 @@ export default function RunAnalysisPage() {
                     : "border border-transparent text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Paste link
+                Video links
               </button>
             </div>
 
@@ -730,9 +686,8 @@ export default function RunAnalysisPage() {
                 aria-label="Link input method"
               >
                 {[
-                  { id: "single", label: "One link" },
-                  { id: "text", label: "Paste many" },
-                  { id: "csv", label: "Upload CSV" },
+                  { id: "text", label: "Paste links" },
+                  { id: "csv", label: "Upload CSV", icon: true },
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -740,58 +695,19 @@ export default function RunAnalysisPage() {
                     role="tab"
                     aria-selected={linkInputMode === tab.id}
                     onClick={() => switchLinkInputMode(tab.id)}
-                    className={`min-h-[40px] flex-1 rounded-none px-3 text-xs font-semibold transition-colors sm:text-sm ${
+                    className={`inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-none px-3 text-xs font-semibold transition-colors sm:text-sm ${
                       linkInputMode === tab.id
                         ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
                         : "border border-transparent text-slate-600 hover:text-slate-900"
                     }`}
                   >
+                    {tab.icon ? <UploadIcon className="h-3.5 w-3.5 shrink-0" /> : null}
                     {tab.label}
                   </button>
                 ))}
               </div>
 
-              {linkInputMode === "single" ? (
-                <form onSubmit={onSubmitLink} className="space-y-6">
-                  <div>
-                    <label htmlFor="run-analysis-source-url" className="text-sm font-semibold text-slate-800">
-                      Media URL
-                    </label>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                      Paste one <span className="font-mono">http</span> or <span className="font-mono">https</span>{" "}
-                      link. The server queues the job and downloads the media for analysis.
-                    </p>
-                    <input
-                      id="run-analysis-source-url"
-                      type="url"
-                      name="source_url"
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder="https://…"
-                      value={sourceUrlInput}
-                      onChange={(e) => setSourceUrlInput(e.target.value)}
-                      className="mt-3 w-full rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                    />
-                  </div>
-
-                  {error ? (
-                    <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
-                      {error}
-                    </p>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-3 pt-1">
-                    <button
-                      type="submit"
-                      disabled={submitting || !sourceUrlInput.trim()}
-                      className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
-                    >
-                      {submitting ? "Submitting…" : "Submit link for analysis"}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <form onSubmit={onSubmitBulkLinks} className="space-y-6">
+              <form onSubmit={onSubmitBulkLinks} className="space-y-6">
                   <input
                     ref={csvInputRef}
                     type="file"
@@ -804,17 +720,17 @@ export default function RunAnalysisPage() {
                   {linkInputMode === "text" ? (
                     <div>
                       <label htmlFor="run-analysis-bulk-text" className="text-sm font-semibold text-slate-800">
-                        Paste links or a sheet export
+                        Paste links
                       </label>
                       <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                        We scan for <span className="font-mono">https://</span> URLs (one per line, in paragraphs, or
-                        mixed with other text) and list them below before you submit.
+                        One or many <span className="font-mono">https://</span> URLs—per line, in paragraphs, or mixed
+                        with other text. We list them below before you submit.
                       </p>
                       <textarea
                         id="run-analysis-bulk-text"
                         rows={8}
                         spellCheck={false}
-                        placeholder={"https://www.youtube.com/watch?v=…\nhttps://www.tiktok.com/@user/video/…"}
+                        placeholder="https://www.youtube.com/watch?v=…"
                         value={bulkTextInput}
                         onChange={onBulkTextChange}
                         className="mt-3 w-full resize-y rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -832,8 +748,9 @@ export default function RunAnalysisPage() {
                           type="button"
                           onClick={() => csvInputRef.current?.click()}
                           disabled={submitting}
-                          className="rounded-none border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                          className="inline-flex items-center gap-2 rounded-none border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
                         >
+                          <UploadIcon className="h-4 w-4 shrink-0 text-slate-600" />
                           Choose CSV
                         </button>
                         {bulkCsvName ? (
@@ -920,7 +837,6 @@ export default function RunAnalysisPage() {
                     ) : null}
                   </div>
                 </form>
-              )}
             </div>
             )}
         </div>
