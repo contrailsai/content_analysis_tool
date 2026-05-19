@@ -90,6 +90,29 @@ function UploadIcon({ className = "h-4 w-4" }) {
   );
 }
 
+function LinkIcon({ className = "h-5 w-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+      <path
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+        d="M13.5 6H5v12h14v-6M10 12l9-9m0 0v4m0-4h-4"
+      />
+    </svg>
+  );
+}
+
+function StepBadge({ n, label }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-blue-600 bg-blue-600 text-[0.65rem] font-bold text-white">
+        {n}
+      </span>
+      <span className="text-sm font-semibold text-slate-900">{label}</span>
+    </div>
+  );
+}
+
 /** Snapshot of the file for overlay + multipart parity fields (validated on server). */
 function appendFileWithMetadata(formData, f) {
   formData.append("file", f, f.name);
@@ -122,6 +145,9 @@ export default function RunAnalysisPage() {
   /** Set when submitting or tracking a URL-sourced job (overlay metadata). */
   const [linkSession, setLinkSession] = useState(null);
   const [ingestMode, setIngestMode] = useState("file");
+  /** "single" = one URL with live progress; "multiple" = batch queue then Cases list. */
+  const [linkScope, setLinkScope] = useState("single");
+  const [singleLinkInput, setSingleLinkInput] = useState("");
   const [linkInputMode, setLinkInputMode] = useState("text");
   const [bulkTextInput, setBulkTextInput] = useState("");
   const [detectedUrls, setDetectedUrls] = useState([]);
@@ -129,7 +155,10 @@ export default function RunAnalysisPage() {
   const csvInputRef = useRef(null);
 
   const tracking = Boolean(trackingJobId);
-  const busy = submitting || tracking;
+  const formLocked = submitting || tracking;
+  /** Full-screen progress only for file upload or a single tracked link—not batch queue. */
+  const showProgressOverlay =
+    tracking || uploadSession != null || linkSession != null || (submitting && ingestMode === "file");
 
   const clearRunSessions = useCallback(() => {
     if (sessionPreviewRef.current) {
@@ -142,7 +171,7 @@ export default function RunAnalysisPage() {
 
   const switchIngestMode = useCallback(
     (mode) => {
-      if (busy) return;
+      if (formLocked) return;
       setIngestMode(mode);
       setError("");
       setStatus("");
@@ -150,25 +179,42 @@ export default function RunAnalysisPage() {
         setFile(null);
       }
       if (mode === "file") {
+        setLinkScope("single");
+        setSingleLinkInput("");
         setLinkInputMode("text");
         setBulkTextInput("");
         setDetectedUrls([]);
         setBulkCsvName("");
       }
     },
-    [busy],
+    [formLocked],
+  );
+
+  const switchLinkScope = useCallback(
+    (scope) => {
+      if (formLocked) return;
+      setLinkScope(scope);
+      setError("");
+      setStatus("");
+      setSingleLinkInput("");
+      setLinkInputMode("text");
+      setBulkTextInput("");
+      setDetectedUrls([]);
+      setBulkCsvName("");
+    },
+    [formLocked],
   );
 
   const switchLinkInputMode = useCallback(
     (mode) => {
-      if (busy) return;
+      if (formLocked) return;
       setLinkInputMode(mode);
       setError("");
       setDetectedUrls([]);
       setBulkCsvName("");
       setBulkTextInput("");
     },
-    [busy],
+    [formLocked],
   );
 
   const runUrlDetection = useCallback((text) => {
@@ -191,7 +237,7 @@ export default function RunAnalysisPage() {
   function onCsvInputChange(e) {
     const f = e.target.files?.[0];
     e.target.value = "";
-    if (!f || busy) return;
+    if (!f || formLocked) return;
     setError("");
     const name = f.name || "upload.csv";
     const lower = name.toLowerCase();
@@ -211,6 +257,57 @@ export default function RunAnalysisPage() {
     };
     reader.onerror = () => setError("Could not read the CSV file.");
     reader.readAsText(f);
+  }
+
+  async function onSubmitSingleLink(e) {
+    e.preventDefault();
+    setError("");
+    setStatus("");
+    const trimmed = singleLinkInput.trim();
+    if (!trimmed) {
+      setError("Enter a video link starting with https://");
+      return;
+    }
+    const urls = extractHttpsUrls(trimmed);
+    const href = urls[0] || null;
+    if (!href) {
+      setError("Enter a valid https:// URL.");
+      return;
+    }
+    if (urls.length > 1) {
+      setError("Only one link at a time here. Switch to “Multiple links” to queue several.");
+      return;
+    }
+    setSubmitting(true);
+    setLinkSession({ sourceUrl: href });
+    try {
+      const res = await fetch("/api/analysis/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_url: href }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLinkSession(null);
+        setError(data.error || "Something went wrong.");
+        return;
+      }
+      const jobId = data.job_id;
+      if (!jobId || typeof jobId !== "string") {
+        setLinkSession(null);
+        setError("Missing job id from server.");
+        return;
+      }
+      setSingleLinkInput("");
+      setStatus("Queued for analysis…");
+      setTrackingJobId(jobId);
+      router.refresh();
+    } catch {
+      setLinkSession(null);
+      setError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function onSubmitBulkLinks(e) {
@@ -359,29 +456,29 @@ export default function RunAnalysisPage() {
   }, []);
 
   useEffect(() => {
-    if (!busy) return undefined;
+    if (!showProgressOverlay) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [busy]);
+  }, [showProgressOverlay]);
 
   const openPicker = useCallback(() => {
-    if (busy) return;
+    if (formLocked) return;
     inputRef.current?.click();
-  }, [busy]);
+  }, [formLocked]);
 
   const removeFile = useCallback(() => {
-    if (busy) return;
+    if (formLocked) return;
     setFile(null);
     setError("");
     setStatus("");
-  }, [busy]);
+  }, [formLocked]);
 
   const pickFile = useCallback(
     (f) => {
-      if (busy) return;
+      if (formLocked) return;
       if (!f) return;
       if (!isAcceptedFile(f)) {
         setError("Only image and video files are supported.");
@@ -395,7 +492,7 @@ export default function RunAnalysisPage() {
       setStatus("");
       setFile(f);
     },
-    [busy],
+    [formLocked],
   );
 
   function onInputChange(e) {
@@ -408,14 +505,14 @@ export default function RunAnalysisPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    if (busy) return;
+    if (formLocked) return;
     pickFile(e.dataTransfer.files?.[0]);
   }
 
   function onDragOver(e) {
     e.preventDefault();
     e.stopPropagation();
-    if (busy) return;
+    if (formLocked) return;
     setDragOver(true);
   }
 
@@ -498,16 +595,16 @@ export default function RunAnalysisPage() {
     <div className="mx-auto max-w-3xl rounded-none">
       <div className="relative min-h-[min(85vh,640px)] overflow-hidden rounded-none border border-slate-200 bg-white shadow-sm">
         <div
-          className={`relative rounded-none px-6 py-10 sm:px-10 sm:py-12 ${busy ? "pointer-events-none select-none" : ""}`}
-          aria-hidden={busy ? true : undefined}
+          className={`relative rounded-none px-6 py-10 sm:px-10 sm:py-12 ${showProgressOverlay ? "pointer-events-none select-none" : ""}`}
+          aria-hidden={showProgressOverlay ? true : undefined}
         >
             <p className="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-slate-500">Ingest</p>
             <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-[2rem]">
               New analysis
             </h1>
             <p className="mt-4 max-w-xl text-[0.9375rem] leading-relaxed text-slate-600">
-              Upload a file or add video links—one or many—from pasted text or a CSV. Each link runs through the same
-              logo, on-screen text, and metadata pipeline.
+              Upload one image or video and watch progress here, or queue remote video links. One link runs with live
+              progress; many links go straight to your Cases list.
             </p>
 
             <div
@@ -654,7 +751,7 @@ export default function RunAnalysisPage() {
                 )}
               </div>
 
-              {error ? (
+              {error && ingestMode === "file" ? (
                 <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
                   {error}
                 </p>
@@ -679,14 +776,110 @@ export default function RunAnalysisPage() {
               </div>
             </form>
             ) : (
-            <div className="mt-10 space-y-6">
+            <div className="mt-10 space-y-8">
+              <div
+                className="border border-blue-200 bg-blue-50/50 px-4 py-3 text-sm leading-relaxed text-slate-700"
+                role="note"
+              >
+                <span className="font-semibold text-blue-800">One link</span> — stay on this page while we download and
+                analyze. <span className="font-semibold text-blue-800">Multiple links</span> — jobs queue immediately and
+                you continue on Cases.
+              </div>
+
+              <div
+                className="flex rounded-none border border-slate-200 bg-slate-50 p-1"
+                role="tablist"
+                aria-label="How many links"
+              >
+                {[
+                  { id: "single", label: "One link", hint: "Live progress" },
+                  { id: "multiple", label: "Multiple links", hint: "Go to Cases" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={linkScope === tab.id}
+                    onClick={() => switchLinkScope(tab.id)}
+                    className={`min-h-[52px] flex-1 rounded-none px-3 py-2 text-left transition-colors sm:px-4 ${
+                      linkScope === tab.id
+                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
+                        : "border border-transparent text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{tab.label}</span>
+                    <span className="mt-0.5 block text-[0.65rem] font-medium uppercase tracking-wide text-slate-500">
+                      {tab.hint}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {linkScope === "single" ? (
+                <form onSubmit={onSubmitSingleLink} className="space-y-6">
+                  <div>
+                    <StepBadge n={1} label="Paste your video URL" />
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                      Public <span className="font-mono">https://</span> link to the video page. You will see download
+                      and analysis progress before results open.
+                    </p>
+                    <div className="mt-4 flex gap-0 border border-slate-300 bg-white shadow-sm focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-600/20">
+                      <span
+                        className="flex shrink-0 items-center border-r border-slate-200 bg-slate-50 px-3 text-slate-500"
+                        aria-hidden
+                      >
+                        <LinkIcon className="h-5 w-5" />
+                      </span>
+                      <input
+                        id="run-analysis-single-link"
+                        type="url"
+                        inputMode="url"
+                        autoComplete="url"
+                        spellCheck={false}
+                        placeholder="https://www.youtube.com/watch?v=…"
+                        value={singleLinkInput}
+                        onChange={(e) => {
+                          setSingleLinkInput(e.target.value);
+                          setError("");
+                        }}
+                        className="min-w-0 flex-1 rounded-none border-0 bg-white px-4 py-3 font-mono text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                      />
+                    </div>
+                  </div>
+
+                  {error && ingestMode === "link" && linkScope === "single" ? (
+                    <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
+                      {error}
+                    </p>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    <button
+                      type="submit"
+                      disabled={submitting || !singleLinkInput.trim()}
+                      className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {submitting ? "Starting…" : "Run analysis"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+              <>
+              <div>
+                <StepBadge n={1} label="Add links" />
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  Paste text or upload a CSV. We extract every <span className="font-mono">https://</span> URL, then you
+                  queue them on Cases—no waiting for results on this page.
+                </p>
+              </div>
+
               <div
                 className="flex flex-wrap gap-1 rounded-none border border-slate-200 bg-slate-50 p-1"
                 role="tablist"
                 aria-label="Link input method"
               >
                 {[
-                  { id: "text", label: "Paste links" },
+                  { id: "text", label: "Paste text" },
                   { id: "csv", label: "Upload CSV", icon: true },
                 ].map((tab) => (
                   <button
@@ -719,12 +912,10 @@ export default function RunAnalysisPage() {
 
                   {linkInputMode === "text" ? (
                     <div>
-                      <label htmlFor="run-analysis-bulk-text" className="text-sm font-semibold text-slate-800">
-                        Paste links
-                      </label>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                        One or many <span className="font-mono">https://</span> URLs—per line, in paragraphs, or mixed
-                        with other text. We list them below before you submit.
+                      <StepBadge n={2} label="Paste or type URLs" />
+                      <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                        Any mix of text—we pull out every <span className="font-mono">https://</span> link and show them
+                        in the review list below.
                       </p>
                       <textarea
                         id="run-analysis-bulk-text"
@@ -738,8 +929,8 @@ export default function RunAnalysisPage() {
                     </div>
                   ) : (
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">Upload a CSV</p>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      <StepBadge n={2} label="Upload a CSV" />
+                      <p className="mt-2 text-xs leading-relaxed text-slate-500">
                         Any column may contain links—we extract every <span className="font-mono">https://</span> URL in
                         the file (same rules as paste mode).
                       </p>
@@ -763,16 +954,19 @@ export default function RunAnalysisPage() {
                   )}
 
                   {detectedUrls.length > 0 ? (
-                    <div className="rounded-none border border-slate-200 bg-slate-50/80">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-                        <p className="text-sm font-semibold text-slate-800">
-                          {detectedUrls.length} link{detectedUrls.length === 1 ? "" : "s"} ready
-                          {detectedUrls.length > MAX_BATCH_SOURCE_URLS ? (
-                            <span className="ml-2 font-normal text-red-700">
-                              (max {MAX_BATCH_SOURCE_URLS} per batch)
-                            </span>
-                          ) : null}
-                        </p>
+                    <div className="rounded-none border border-slate-200 bg-white">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            Step 3 · Review {detectedUrls.length} link{detectedUrls.length === 1 ? "" : "s"}
+                            {detectedUrls.length > MAX_BATCH_SOURCE_URLS ? (
+                              <span className="ml-2 font-normal text-red-700">
+                                (max {MAX_BATCH_SOURCE_URLS})
+                              </span>
+                            ) : null}
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-500">Queued on Cases—you can leave this page right away.</p>
+                        </div>
                         <button
                           type="button"
                           onClick={() => {
@@ -786,27 +980,36 @@ export default function RunAnalysisPage() {
                         </button>
                       </div>
                       <ul className="max-h-56 divide-y divide-slate-200 overflow-y-auto">
-                        {detectedUrls.map((href) => (
-                          <li key={href} className="flex items-start gap-2 px-4 py-2.5">
-                            <span className="min-w-0 flex-1 break-all font-mono text-[0.75rem] text-slate-800">
-                              {href}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => removeDetectedUrl(href)}
-                              className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-red-700"
-                            >
-                              Remove
-                            </button>
-                          </li>
-                        ))}
+                        {detectedUrls.map((href) => {
+                          const host = safeUrlHostname(href);
+                          return (
+                            <li key={href} className="flex items-start gap-3 px-4 py-3">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-blue-200 bg-blue-50 text-blue-700">
+                                <LinkIcon className="h-4 w-4" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                {host ? (
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{host}</p>
+                                ) : null}
+                                <p className="mt-0.5 break-all font-mono text-[0.75rem] leading-snug text-slate-800">{href}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeDetectedUrl(href)}
+                                className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-red-700"
+                              >
+                                Remove
+                              </button>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   ) : linkInputMode === "text" && bulkTextInput.trim() ? (
                     <p className="text-xs text-slate-500">No https:// links detected yet.</p>
                   ) : null}
 
-                  {error ? (
+                  {error && linkScope === "multiple" ? (
                     <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
                       {error}
                     </p>
@@ -824,7 +1027,9 @@ export default function RunAnalysisPage() {
                     >
                       {submitting
                         ? "Queueing…"
-                        : `Submit ${detectedUrls.length || ""} link${detectedUrls.length === 1 ? "" : "s"} for analysis`}
+                        : detectedUrls.length
+                          ? `Queue ${detectedUrls.length} on Cases`
+                          : "Queue on Cases"}
                     </button>
                     {linkInputMode === "text" && bulkTextInput.trim() && !detectedUrls.length ? (
                       <button
@@ -837,12 +1042,14 @@ export default function RunAnalysisPage() {
                     ) : null}
                   </div>
                 </form>
+              </>
+              )}
             </div>
             )}
         </div>
       </div>
 
-      {busy ? (
+      {showProgressOverlay ? (
         <div
           className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-slate-900/25 backdrop-blur-sm"
           role="dialog"
@@ -875,12 +1082,17 @@ export default function RunAnalysisPage() {
                 </div>
 
                 <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-[minmax(0,1fr)_minmax(200px,240px)]">
-                  <div className="border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:p-8">
+                  <div className={`border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:p-8 ${linkSession ? "border-l-4 border-l-blue-600 bg-blue-50/30" : ""}`}>
                     {linkSession ? (
                       <dl className="space-y-2.5 text-xs text-slate-600">
-                        <div>
-                          <dt className="font-semibold uppercase tracking-wide text-slate-500">Source URL</dt>
-                          <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{linkSession.sourceUrl}</dd>
+                        <div className="flex items-start gap-2">
+                          <span className="mt-0.5 text-blue-600" aria-hidden>
+                            <LinkIcon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <dt className="font-semibold uppercase tracking-wide text-slate-500">Video link</dt>
+                            <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{linkSession.sourceUrl}</dd>
+                          </div>
                         </div>
                         {linkHostname ? (
                           <div>
@@ -934,11 +1146,11 @@ export default function RunAnalysisPage() {
                       <div className="h-16 w-16 rounded-none border-2 border-blue-200 border-t-blue-600 motion-safe:animate-spin" aria-hidden />
                     ) : null}
                     {linkSession && !overlayPreview && tracking ? (
-                      <div className="flex max-w-[220px] flex-col items-center gap-3 px-2 text-center">
-                        <svg className="h-10 w-10 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25} aria-hidden>
-                          <path strokeLinecap="square" strokeLinejoin="miter" d="M13.5 6H5v12h14v-6M10 12l9-9m0 0v4m0-4h-4" />
-                        </svg>
-                        <p className="text-[0.7rem] font-medium uppercase tracking-wide text-slate-400">Remote media</p>
+                      <div className="flex max-w-[220px] flex-col items-center gap-3 border border-slate-700 bg-slate-900/80 px-4 py-5 text-center">
+                        <span className="text-blue-400" aria-hidden>
+                          <LinkIcon className="h-10 w-10" />
+                        </span>
+                        <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-300">Fetching remote video</p>
                         <a
                           href={linkSession.sourceUrl}
                           target="_blank"
