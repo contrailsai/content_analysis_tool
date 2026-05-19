@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatLocalDateTimeWithOffset } from "@/lib/formatLocalDateTime";
 import { extractHttpsUrls, MAX_BATCH_SOURCE_URLS } from "@/lib/urlIngest";
 
 const ACCEPT = "image/*,video/*";
@@ -20,15 +19,6 @@ function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function formatLastModified(ms) {
-  if (typeof ms !== "number" || Number.isNaN(ms)) return "—";
-  try {
-    return formatLocalDateTimeWithOffset(ms);
-  } catch {
-    return "—";
-  }
 }
 
 function downloadStepFinished(status) {
@@ -74,42 +64,11 @@ function statusChipClass(status) {
   return "border-slate-200 bg-white text-slate-700";
 }
 
-function safeUrlHostname(urlString) {
-  try {
-    return new URL(urlString).hostname || "";
-  } catch {
-    return "";
-  }
-}
-
 function UploadIcon({ className = "h-4 w-4" }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
       <path strokeLinecap="square" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
     </svg>
-  );
-}
-
-function LinkIcon({ className = "h-5 w-5" }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-      <path
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-        d="M13.5 6H5v12h14v-6M10 12l9-9m0 0v4m0-4h-4"
-      />
-    </svg>
-  );
-}
-
-function StepBadge({ n, label }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-blue-600 bg-blue-600 text-[0.65rem] font-bold text-white">
-        {n}
-      </span>
-      <span className="text-sm font-semibold text-slate-900">{label}</span>
-    </div>
   );
 }
 
@@ -580,8 +539,6 @@ export default function RunAnalysisPage() {
   const overlayMime = uploadSession?.mime || file?.type || "";
   const overlayIsVideo = overlayMime.startsWith("video/");
   const overlayIsImage = overlayMime.startsWith("image/");
-  const linkHostname = linkSession ? safeUrlHostname(linkSession.sourceUrl) : "";
-
   const steps = jobSnapshot
     ? [
         { key: "dl", label: "Download", value: jobSnapshot.download_status },
@@ -598,14 +555,8 @@ export default function RunAnalysisPage() {
           className={`relative rounded-none px-6 py-10 sm:px-10 sm:py-12 ${showProgressOverlay ? "pointer-events-none select-none" : ""}`}
           aria-hidden={showProgressOverlay ? true : undefined}
         >
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-slate-500">Ingest</p>
-            <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-[2rem]">
-              New analysis
-            </h1>
-            <p className="mt-4 max-w-xl text-[0.9375rem] leading-relaxed text-slate-600">
-              Upload one image or video and watch progress here, or queue remote video links. One link runs with live
-              progress; many links go straight to your Cases list.
-            </p>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">New analysis</h1>
+            <p className="mt-2 text-sm text-slate-600">Image, video file, or video URL.</p>
 
             <div
               className="mt-8 flex rounded-none border border-slate-200 bg-slate-50 p-1"
@@ -689,9 +640,7 @@ export default function RunAnalysisPage() {
                           browse
                         </span>
                       </p>
-                      <p className="mt-3 text-[0.7rem] font-medium uppercase tracking-wider text-slate-400">
-                        Images &amp; video · max {MAX_BYTES / (1024 * 1024)} MB
-                      </p>
+                      <p className="mt-2 text-xs text-slate-400">Max {MAX_BYTES / (1024 * 1024)} MB</p>
                     </div>
                   </div>
                 ) : (
@@ -757,43 +706,26 @@ export default function RunAnalysisPage() {
                 </p>
               ) : null}
 
-              <div className="flex flex-wrap gap-3 pt-1">
+              <div className="pt-1">
                 <button
                   type="submit"
                   disabled={submitting || !file}
-                  className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
+                  className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {submitting ? "Submitting…" : "Submit for analysis"}
-                </button>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={openPicker}
-                  className="rounded-none border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Choose file
+                  {submitting ? "Submitting…" : "Run analysis"}
                 </button>
               </div>
             </form>
             ) : (
-            <div className="mt-10 space-y-8">
-              <div
-                className="border border-blue-200 bg-blue-50/50 px-4 py-3 text-sm leading-relaxed text-slate-700"
-                role="note"
-              >
-                <span className="font-semibold text-blue-800">One link</span> — stay on this page while we download and
-                analyze. <span className="font-semibold text-blue-800">Multiple links</span> — jobs queue immediately and
-                you continue on Cases.
-              </div>
-
+            <div className="mt-8 space-y-5">
               <div
                 className="flex rounded-none border border-slate-200 bg-slate-50 p-1"
                 role="tablist"
                 aria-label="How many links"
               >
                 {[
-                  { id: "single", label: "One link", hint: "Live progress" },
-                  { id: "multiple", label: "Multiple links", hint: "Go to Cases" },
+                  { id: "single", label: "One link" },
+                  { id: "multiple", label: "Multiple" },
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -801,172 +733,113 @@ export default function RunAnalysisPage() {
                     role="tab"
                     aria-selected={linkScope === tab.id}
                     onClick={() => switchLinkScope(tab.id)}
-                    className={`min-h-[52px] flex-1 rounded-none px-3 py-2 text-left transition-colors sm:px-4 ${
+                    className={`min-h-[40px] flex-1 rounded-none px-4 text-sm font-semibold transition-colors ${
                       linkScope === tab.id
                         ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
                         : "border border-transparent text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    <span className="block text-sm font-semibold">{tab.label}</span>
-                    <span className="mt-0.5 block text-[0.65rem] font-medium uppercase tracking-wide text-slate-500">
-                      {tab.hint}
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              {linkScope === "single" ? (
-                <form onSubmit={onSubmitSingleLink} className="space-y-6">
-                  <div>
-                    <StepBadge n={1} label="Paste your video URL" />
-                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                      Public <span className="font-mono">https://</span> link to the video page. You will see download
-                      and analysis progress before results open.
-                    </p>
-                    <div className="mt-4 flex gap-0 border border-slate-300 bg-white shadow-sm focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-600/20">
-                      <span
-                        className="flex shrink-0 items-center border-r border-slate-200 bg-slate-50 px-3 text-slate-500"
-                        aria-hidden
-                      >
-                        <LinkIcon className="h-5 w-5" />
-                      </span>
-                      <input
-                        id="run-analysis-single-link"
-                        type="url"
-                        inputMode="url"
-                        autoComplete="url"
-                        spellCheck={false}
-                        placeholder="https://www.youtube.com/watch?v=…"
-                        value={singleLinkInput}
-                        onChange={(e) => {
-                          setSingleLinkInput(e.target.value);
-                          setError("");
-                        }}
-                        className="min-w-0 flex-1 rounded-none border-0 bg-white px-4 py-3 font-mono text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                      />
-                    </div>
-                  </div>
-
-                  {error && ingestMode === "link" && linkScope === "single" ? (
-                    <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
-                      {error}
-                    </p>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-3 pt-1">
-                    <button
-                      type="submit"
-                      disabled={submitting || !singleLinkInput.trim()}
-                      className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {submitting ? "Starting…" : "Run analysis"}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-              <>
-              <div>
-                <StepBadge n={1} label="Add links" />
-                <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                  Paste text or upload a CSV. We extract every <span className="font-mono">https://</span> URL, then you
-                  queue them on Cases—no waiting for results on this page.
-                </p>
-              </div>
-
-              <div
-                className="flex flex-wrap gap-1 rounded-none border border-slate-200 bg-slate-50 p-1"
-                role="tablist"
-                aria-label="Link input method"
-              >
-                {[
-                  { id: "text", label: "Paste text" },
-                  { id: "csv", label: "Upload CSV", icon: true },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={linkInputMode === tab.id}
-                    onClick={() => switchLinkInputMode(tab.id)}
-                    className={`inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-none px-3 text-xs font-semibold transition-colors sm:text-sm ${
-                      linkInputMode === tab.id
-                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
-                        : "border border-transparent text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {tab.icon ? <UploadIcon className="h-3.5 w-3.5 shrink-0" /> : null}
                     {tab.label}
                   </button>
                 ))}
               </div>
 
-              <form onSubmit={onSubmitBulkLinks} className="space-y-6">
+              {linkScope === "single" ? (
+                <form onSubmit={onSubmitSingleLink} className="space-y-4">
+                  <div>
+                    <label htmlFor="run-analysis-single-link" className="text-sm font-medium text-slate-800">
+                      Video URL
+                    </label>
+                    <input
+                      id="run-analysis-single-link"
+                      type="url"
+                      spellCheck={false}
+                      placeholder="https://…"
+                      value={singleLinkInput}
+                      onChange={(e) => {
+                        setSingleLinkInput(e.target.value);
+                        setError("");
+                      }}
+                      className="mt-2 w-full rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                    />
+                  </div>
+                  {error && ingestMode === "link" && linkScope === "single" ? (
+                    <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p>
+                  ) : null}
+                  <button
+                    type="submit"
+                    disabled={submitting || !singleLinkInput.trim()}
+                    className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submitting ? "Starting…" : "Run analysis"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={onSubmitBulkLinks} className="space-y-4">
                   <input
                     ref={csvInputRef}
                     type="file"
                     accept=".csv,text/csv"
                     className="sr-only"
-                    aria-hidden
                     onChange={onCsvInputChange}
                   />
+                  <div className="flex border border-slate-200 bg-slate-50 p-1" role="tablist">
+                    {[
+                      { id: "text", label: "Paste" },
+                      { id: "csv", label: "CSV" },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={linkInputMode === tab.id}
+                        onClick={() => switchLinkInputMode(tab.id)}
+                        className={`min-h-[36px] flex-1 rounded-none px-3 text-sm font-semibold ${
+                          linkInputMode === tab.id
+                            ? "border border-slate-200 bg-white text-slate-900"
+                            : "text-slate-600"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
 
                   {linkInputMode === "text" ? (
-                    <div>
-                      <StepBadge n={2} label="Paste or type URLs" />
-                      <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                        Any mix of text—we pull out every <span className="font-mono">https://</span> link and show them
-                        in the review list below.
-                      </p>
-                      <textarea
-                        id="run-analysis-bulk-text"
-                        rows={8}
-                        spellCheck={false}
-                        placeholder="https://www.youtube.com/watch?v=…"
-                        value={bulkTextInput}
-                        onChange={onBulkTextChange}
-                        className="mt-3 w-full resize-y rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
+                    <textarea
+                      id="run-analysis-bulk-text"
+                      rows={5}
+                      spellCheck={false}
+                      placeholder="Paste https:// links…"
+                      value={bulkTextInput}
+                      onChange={onBulkTextChange}
+                      className="w-full resize-y rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                    />
                   ) : (
-                    <div>
-                      <StepBadge n={2} label="Upload a CSV" />
-                      <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                        Any column may contain links—we extract every <span className="font-mono">https://</span> URL in
-                        the file (same rules as paste mode).
-                      </p>
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => csvInputRef.current?.click()}
-                          disabled={submitting}
-                          className="inline-flex items-center gap-2 rounded-none border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          <UploadIcon className="h-4 w-4 shrink-0 text-slate-600" />
-                          Choose CSV
-                        </button>
-                        {bulkCsvName ? (
-                          <span className="truncate text-xs text-slate-600" title={bulkCsvName}>
-                            {bulkCsvName}
-                          </span>
-                        ) : null}
-                      </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => csvInputRef.current?.click()}
+                        disabled={submitting}
+                        className="rounded-none border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Choose CSV
+                      </button>
+                      {bulkCsvName ? (
+                        <span className="truncate text-xs text-slate-500">{bulkCsvName}</span>
+                      ) : null}
                     </div>
                   )}
 
                   {detectedUrls.length > 0 ? (
-                    <div className="rounded-none border border-slate-200 bg-white">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">
-                            Step 3 · Review {detectedUrls.length} link{detectedUrls.length === 1 ? "" : "s"}
-                            {detectedUrls.length > MAX_BATCH_SOURCE_URLS ? (
-                              <span className="ml-2 font-normal text-red-700">
-                                (max {MAX_BATCH_SOURCE_URLS})
-                              </span>
-                            ) : null}
-                          </p>
-                          <p className="mt-0.5 text-xs text-slate-500">Queued on Cases—you can leave this page right away.</p>
-                        </div>
+                    <div className="border border-slate-200">
+                      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                        <span className="font-medium text-slate-800">
+                          {detectedUrls.length} link{detectedUrls.length === 1 ? "" : "s"}
+                          {detectedUrls.length > MAX_BATCH_SOURCE_URLS ? (
+                            <span className="text-red-700"> · max {MAX_BATCH_SOURCE_URLS}</span>
+                          ) : null}
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
@@ -974,75 +847,52 @@ export default function RunAnalysisPage() {
                             setBulkTextInput("");
                             setBulkCsvName("");
                           }}
-                          className="text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-900"
+                          className="text-xs font-semibold text-slate-600 hover:text-slate-900"
                         >
-                          Clear all
+                          Clear
                         </button>
                       </div>
-                      <ul className="max-h-56 divide-y divide-slate-200 overflow-y-auto">
-                        {detectedUrls.map((href) => {
-                          const host = safeUrlHostname(href);
-                          return (
-                            <li key={href} className="flex items-start gap-3 px-4 py-3">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-blue-200 bg-blue-50 text-blue-700">
-                                <LinkIcon className="h-4 w-4" />
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                {host ? (
-                                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{host}</p>
-                                ) : null}
-                                <p className="mt-0.5 break-all font-mono text-[0.75rem] leading-snug text-slate-800">{href}</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeDetectedUrl(href)}
-                                className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-red-700"
-                              >
-                                Remove
-                              </button>
-                            </li>
-                          );
-                        })}
+                      <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto">
+                        {detectedUrls.map((href) => (
+                          <li key={href} className="flex items-center gap-2 px-3 py-2">
+                            <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-700" title={href}>
+                              {href}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeDetectedUrl(href)}
+                              className="shrink-0 text-xs text-slate-500 hover:text-red-700"
+                            >
+                              ×
+                            </button>
+                          </li>
+                        ))}
                       </ul>
                     </div>
                   ) : linkInputMode === "text" && bulkTextInput.trim() ? (
-                    <p className="text-xs text-slate-500">No https:// links detected yet.</p>
+                    <p className="text-xs text-slate-500">No https:// links found.</p>
                   ) : null}
 
                   {error && linkScope === "multiple" ? (
-                    <p className="rounded-none border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-900">
-                      {error}
-                    </p>
+                    <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p>
                   ) : null}
 
-                  <div className="flex flex-wrap gap-3 pt-1">
-                    <button
-                      type="submit"
-                      disabled={
-                        submitting ||
-                        detectedUrls.length === 0 ||
-                        detectedUrls.length > MAX_BATCH_SOURCE_URLS
-                      }
-                      className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 disabled:hover:shadow-sm"
-                    >
-                      {submitting
-                        ? "Queueing…"
-                        : detectedUrls.length
-                          ? `Queue ${detectedUrls.length} on Cases`
-                          : "Queue on Cases"}
-                    </button>
-                    {linkInputMode === "text" && bulkTextInput.trim() && !detectedUrls.length ? (
-                      <button
-                        type="button"
-                        onClick={() => runUrlDetection(bulkTextInput)}
-                        className="rounded-none border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50"
-                      >
-                        Scan again
-                      </button>
-                    ) : null}
-                  </div>
+                  <button
+                    type="submit"
+                    disabled={
+                      submitting ||
+                      detectedUrls.length === 0 ||
+                      detectedUrls.length > MAX_BATCH_SOURCE_URLS
+                    }
+                    className="rounded-none border border-blue-700 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submitting
+                      ? "Queueing…"
+                      : detectedUrls.length
+                        ? `Queue ${detectedUrls.length} on Cases`
+                        : "Queue on Cases"}
+                  </button>
                 </form>
-              </>
               )}
             </div>
             )}
@@ -1062,66 +912,29 @@ export default function RunAnalysisPage() {
           <div className="relative flex w-full flex-col items-center justify-center px-4 py-12 sm:px-8 sm:py-16">
             <div className="cat-run-panel-in relative w-full max-w-2xl rounded-none border border-slate-200/95 bg-white/95 shadow-[0_24px_48px_-20px_rgba(15,23,42,0.35)] ring-1 ring-slate-900/[0.04]">
                 <div className="border-b border-slate-100 px-7 py-6 sm:px-9 sm:py-8">
-                  <p id="run-analysis-busy-title" className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-blue-700">
-                    {submitting ? (linkSession ? "Queueing job" : "Secure upload") : "Analysis"}
-                  </p>
-                  <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+                  <h2 id="run-analysis-busy-title" className="text-lg font-semibold text-slate-900 sm:text-xl">
                     {submitting
                       ? linkSession
-                        ? "Registering your URL"
-                        : "Sending your media"
-                      : "Running your pipeline"}
+                        ? "Starting…"
+                        : "Uploading…"
+                      : "Analyzing…"}
                   </h2>
-                  <p id="run-analysis-busy-desc" className="mt-2 text-sm leading-relaxed text-slate-600">
+                  <p id="run-analysis-busy-desc" className="mt-1 text-sm text-slate-600">
                     {submitting
-                      ? linkSession
-                        ? "Creating the job record and enqueueing the worker to fetch and store the remote media."
-                        : "Preserving original filename, type, and timestamps end-to-end."
-                      : "We will open results as soon as download, logo, OCR, and metadata stages finish."}
+                      ? "Please wait."
+                      : "Opening results when finished."}
                   </p>
                 </div>
 
                 <div className="grid gap-0 border-b border-slate-100 sm:grid-cols-[minmax(0,1fr)_minmax(200px,240px)]">
-                  <div className={`border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:p-8 ${linkSession ? "border-l-4 border-l-blue-600 bg-blue-50/30" : ""}`}>
+                  <div className="border-b border-slate-100 p-6 sm:border-b-0 sm:border-r sm:p-8">
                     {linkSession ? (
-                      <dl className="space-y-2.5 text-xs text-slate-600">
-                        <div className="flex items-start gap-2">
-                          <span className="mt-0.5 text-blue-600" aria-hidden>
-                            <LinkIcon className="h-4 w-4" />
-                          </span>
-                          <div className="min-w-0">
-                            <dt className="font-semibold uppercase tracking-wide text-slate-500">Video link</dt>
-                            <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{linkSession.sourceUrl}</dd>
-                          </div>
-                        </div>
-                        {linkHostname ? (
-                          <div>
-                            <dt className="font-semibold uppercase tracking-wide text-slate-500">Host</dt>
-                            <dd className="mt-0.5 font-mono text-[0.8rem] text-slate-900">{linkHostname}</dd>
-                          </div>
-                        ) : null}
-                      </dl>
+                      <p className="break-all font-mono text-xs text-slate-800">{linkSession.sourceUrl}</p>
                     ) : fileOverlayMeta ? (
-                      <dl className="space-y-2.5 text-xs text-slate-600">
-                        <div>
-                          <dt className="font-semibold uppercase tracking-wide text-slate-500">File name</dt>
-                          <dd className="mt-0.5 break-all font-mono text-[0.8rem] text-slate-900">{fileOverlayMeta.name}</dd>
-                        </div>
-                        <div className="flex flex-wrap gap-x-6 gap-y-2">
-                          <div>
-                            <dt className="font-semibold uppercase tracking-wide text-slate-500">Size</dt>
-                            <dd className="mt-0.5 tabular-nums text-slate-900">{formatBytes(fileOverlayMeta.size)}</dd>
-                          </div>
-                          <div>
-                            <dt className="font-semibold uppercase tracking-wide text-slate-500">MIME</dt>
-                            <dd className="mt-0.5 break-all font-mono text-[0.75rem] text-slate-900">{fileOverlayMeta.mime || "—"}</dd>
-                          </div>
-                        </div>
-                        <div>
-                          <dt className="font-semibold uppercase tracking-wide text-slate-500">Last modified</dt>
-                          <dd className="mt-0.5 tabular-nums text-slate-900">{formatLastModified(fileOverlayMeta.lastModified)}</dd>
-                        </div>
-                      </dl>
+                      <p className="text-sm text-slate-800">
+                        <span className="break-all font-medium">{fileOverlayMeta.name}</span>
+                        <span className="mt-1 block text-xs text-slate-500">{formatBytes(fileOverlayMeta.size)}</span>
+                      </p>
                     ) : null}
                   </div>
                   <div className="relative flex min-h-[180px] items-center justify-center bg-slate-950 p-4 sm:min-h-[240px]">
@@ -1146,20 +959,7 @@ export default function RunAnalysisPage() {
                       <div className="h-16 w-16 rounded-none border-2 border-blue-200 border-t-blue-600 motion-safe:animate-spin" aria-hidden />
                     ) : null}
                     {linkSession && !overlayPreview && tracking ? (
-                      <div className="flex max-w-[220px] flex-col items-center gap-3 border border-slate-700 bg-slate-900/80 px-4 py-5 text-center">
-                        <span className="text-blue-400" aria-hidden>
-                          <LinkIcon className="h-10 w-10" />
-                        </span>
-                        <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-300">Fetching remote video</p>
-                        <a
-                          href={linkSession.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-semibold text-blue-400 underline decoration-blue-400/40 underline-offset-2 hover:text-blue-300"
-                        >
-                          Open source link
-                        </a>
-                      </div>
+                      <div className="h-12 w-12 border-2 border-blue-200 border-t-blue-600 motion-safe:animate-spin" aria-hidden />
                     ) : null}
                     {submitting && !overlayPreview && !linkSession ? (
                       <div className="h-16 w-16 rounded-none border-2 border-blue-200 border-t-blue-600 motion-safe:animate-spin" aria-hidden />
@@ -1170,22 +970,10 @@ export default function RunAnalysisPage() {
                 <div className="px-7 py-6 sm:px-9 sm:py-8">
                   {tracking && trackingJobId ? (
                     <>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="text-xs font-medium text-slate-500">Job</span>
-                        <code className="max-w-full truncate rounded-none border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[0.65rem] text-slate-800">
-                          {trackingJobId}
-                        </code>
-                      </div>
-                      {jobSnapshot?.overall_status ? (
-                        <p className="mt-2 text-xs text-slate-600">
-                          Overall: <span className="font-semibold text-slate-900">{jobSnapshot.overall_status}</span>
-                        </p>
-                      ) : null}
-
-                      <div className="mt-5">
-                        <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-800">
+                      <div>
+                        <div className="flex items-center justify-between gap-3 text-sm font-medium text-slate-800">
                           <span>Progress</span>
-                          <span className="tabular-nums text-blue-700">{pollProgressPct}%</span>
+                          <span className="tabular-nums text-blue-600">{pollProgressPct}%</span>
                         </div>
                         <div
                           className="relative mt-2 h-2.5 w-full overflow-hidden rounded-none border border-slate-200 bg-slate-100"
@@ -1226,22 +1014,7 @@ export default function RunAnalysisPage() {
                       ) : null}
                     </>
                   ) : (
-                    <p className="text-sm leading-relaxed text-slate-600">
-                      {linkSession ? (
-                        <>
-                          <span className="font-semibold text-slate-900">Sending your URL…</span>
-                          <span className="mt-2 block">The server validates the link, records the job, and adds it to the analysis queue.</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-semibold text-slate-900">Uploading to server…</span>
-                          <span className="mt-2 block">
-                            Your file bytes, name, MIME type, size, and last-modified are sent together for verification on
-                            the server.
-                          </span>
-                        </>
-                      )}
-                    </p>
+                    <p className="text-sm text-slate-600">Please wait…</p>
                   )}
                 </div>
               </div>
