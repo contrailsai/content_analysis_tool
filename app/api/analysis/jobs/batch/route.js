@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { isRequestAuthorized } from "@/lib/authRequest";
 import { sendIngestionMessage } from "@/lib/sqs";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
-import { MAX_BATCH_SOURCE_URLS, validateHttpUrl } from "@/lib/urlIngest";
+import { validateHttpUrl } from "@/lib/urlIngest";
 
 export const runtime = "nodejs";
 
@@ -42,13 +42,6 @@ export async function POST(request) {
 
   if (rawList.length === 0) {
     return NextResponse.json({ error: "At least one URL is required." }, { status: 400 });
-  }
-
-  if (rawList.length > MAX_BATCH_SOURCE_URLS) {
-    return NextResponse.json(
-      { error: `At most ${MAX_BATCH_SOURCE_URLS} URLs per submission.` },
-      { status: 400 },
-    );
   }
 
   const seen = new Set();

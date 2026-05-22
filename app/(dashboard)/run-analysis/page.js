@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { extractHttpsUrls, MAX_BATCH_SOURCE_URLS } from "@/lib/urlIngest";
+import { extractHttpsUrls } from "@/lib/urlIngest";
 
 const ACCEPT = "image/*,video/*";
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -171,12 +171,13 @@ export default function RunAnalysisPage() {
     }
     const reader = new FileReader();
     reader.onload = () => {
-      const text = typeof reader.result === "string" ? reader.result : "";
+      const text =
+        typeof reader.result === "string" ? reader.result.replace(/^\uFEFF/, "") : "";
       const urls = runUrlDetection(text);
       setCsvFileName(name);
       setUrlTextInput("");
       if (!urls.length) {
-        setError("No https:// links found.");
+        setError("No http(s):// links found in this file.");
       }
     };
     reader.onerror = () => setError("Could not read the file.");
@@ -248,11 +249,11 @@ export default function RunAnalysisPage() {
     setError("");
     setStatus("");
     if (!detectedUrls.length) {
-      setError(ingestMode === "csv" ? "Upload a CSV with https:// links." : "Add at least one https:// link.");
-      return;
-    }
-    if (detectedUrls.length > MAX_BATCH_SOURCE_URLS) {
-      setError(`At most ${MAX_BATCH_SOURCE_URLS} links.`);
+      setError(
+        ingestMode === "csv"
+          ? "Upload a CSV that contains at least one http(s):// link."
+          : "Add at least one http(s):// link.",
+      );
       return;
     }
     if (detectedUrls.length === 1) {
@@ -503,8 +504,16 @@ export default function RunAnalysisPage() {
       ]
     : [];
 
-  const urlSubmitDisabled =
-    submitting || detectedUrls.length === 0 || detectedUrls.length > MAX_BATCH_SOURCE_URLS;
+  const urlSubmitDisabled = formLocked || detectedUrls.length === 0;
+
+  const urlSubmitHint =
+    detectedUrls.length === 0
+      ? ingestMode === "csv"
+        ? "Upload a CSV with http(s):// links to enable Run analysis."
+        : "Paste http(s):// links above; Run analysis enables once at least one link is detected."
+      : detectedUrls.length > 1
+        ? `${detectedUrls.length} links will be queued as separate cases.`
+        : null;
 
   return (
     <div className="mx-auto max-w-3xl rounded-none">
@@ -647,7 +656,7 @@ export default function RunAnalysisPage() {
                 id="run-analysis-urls"
                 rows={6}
                 spellCheck={false}
-                placeholder="https://…"
+                placeholder="https://… or http://…"
                 value={urlTextInput}
                 onChange={onUrlTextChange}
                 className="w-full resize-y rounded-none border border-slate-300 bg-white px-4 py-3 font-mono text-sm outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
@@ -662,6 +671,9 @@ export default function RunAnalysisPage() {
               />
               {error ? (
                 <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p>
+              ) : null}
+              {urlSubmitHint ? (
+                <p className="text-sm text-slate-600">{urlSubmitHint}</p>
               ) : null}
               <button
                 type="submit"
@@ -698,6 +710,9 @@ export default function RunAnalysisPage() {
               />
               {error ? (
                 <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p>
+              ) : null}
+              {urlSubmitHint ? (
+                <p className="text-sm text-slate-600">{urlSubmitHint}</p>
               ) : null}
               <button
                 type="submit"
