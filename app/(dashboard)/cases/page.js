@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { basenameFromS3Key, displayJobDocumentLabel } from "@/lib/jobDisplay";
+import {
+  STATUS_FILTER_GROUPS,
+  isFailedStatus,
+  isInvalidDateRange,
+  parseDateFilterParam,
+  parseStatusFilter,
+} from "@/lib/jobStatus";
 import { getSupabaseAdmin } from "@/lib/supabaseServer";
+import CaseRetryButton from "./CaseRetryButton";
 import ClientLocalDateTime from "./ClientLocalDateTime";
 
 export const dynamic = "force-dynamic";
@@ -97,6 +105,68 @@ function sortJobsByDateNewestFirst(jobs) {
   });
 }
 
+function CasesFilters({ status, from, to, queued }) {
+  const hasActiveFilters = Boolean(from || to || (status && status !== "all"));
+  const clearHref = queued ? `/cases?queued=${encodeURIComponent(queued)}` : "/cases";
+
+  return (
+    <form
+      method="get"
+      className="flex flex-col gap-4 rounded-none border border-slate-200 bg-white px-4 py-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end"
+    >
+      {queued ? <input type="hidden" name="queued" value={queued} /> : null}
+      <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+        From
+        <input
+          type="date"
+          name="from"
+          defaultValue={from}
+          className="rounded-none border border-slate-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+        />
+      </label>
+      <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+        To
+        <input
+          type="date"
+          name="to"
+          defaultValue={to}
+          className="rounded-none border border-slate-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+        />
+      </label>
+      <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+        Status
+        <select
+          name="status"
+          defaultValue={status || "all"}
+          className="rounded-none border border-slate-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+        >
+          <option value="all">All statuses</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="processing">Processing</option>
+          <option value="queued">Queued</option>
+        </select>
+      </label>
+      <div className="flex flex-wrap gap-2 sm:pb-0.5">
+        <button
+          type="submit"
+          className="rounded-none border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          Apply filters
+        </button>
+        {hasActiveFilters ? (
+          <Link
+            href={clearHref}
+            className="inline-flex items-center rounded-none border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            Clear
+          </Link>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
 function IconImage() {
   return (
     <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
@@ -146,18 +216,47 @@ function FileTypeIndicator({ kind }) {
 }
 
 export default async function CasesPage({ searchParams }) {
-  const queuedRaw = (await searchParams)?.queued;
+  const params = await searchParams;
+  const queuedRaw = params?.queued;
   const queuedCount = typeof queuedRaw === "string" ? parseInt(queuedRaw, 10) : NaN;
   const showQueuedBanner = Number.isFinite(queuedCount) && queuedCount > 0;
+  const statusFilter = parseStatusFilter(params?.status);
+  const fromDate = parseDateFilterParam(params?.from);
+  const toDate = parseDateFilterParam(params?.to);
+  const queuedParam = typeof queuedRaw === "string" && queuedRaw.trim() !== "" ? queuedRaw : "";
+  const dateRangeInvalid = isInvalidDateRange(fromDate, toDate);
+
   const supabase = getSupabaseAdmin();
-  const { data: jobs, error } = await supabase
+  let query = supabase
     .from("cat_analysis_jobs")
     .select(
       "id, s3_key, source_url, overall_status, download_status, logo_status, ocr_status, metadata_status, created_at, updated_at",
-    )
-    .order("created_at", { ascending: false, nullsFirst: false })
-    .order("id", { ascending: false })
-    .limit(200);
+    );
+
+  if (statusFilter && statusFilter !== "all") {
+    const group = STATUS_FILTER_GROUPS[statusFilter.toLowerCase()];
+    if (group) {
+      query = query.in("overall_status", group);
+    } else {
+      query = query.eq("overall_status", statusFilter);
+    }
+  }
+
+  if (!dateRangeInvalid) {
+    if (fromDate) {
+      query = query.gte("created_at", `${fromDate}T00:00:00.000Z`);
+    }
+    if (toDate) {
+      query = query.lte("created_at", `${toDate}T23:59:59.999Z`);
+    }
+  }
+
+  const { data: jobs, error } = dateRangeInvalid
+    ? { data: [], error: null }
+    : await query
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .limit(200);
 
   if (error) {
     console.error("Supabase list failed", error);
@@ -208,12 +307,23 @@ export default async function CasesPage({ searchParams }) {
         </p>
       ) : null}
 
+      <CasesFilters status={statusFilter} from={fromDate} to={toDate} queued={queuedParam} />
+
+      {dateRangeInvalid ? (
+        <p className="rounded-none border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          The &quot;From&quot; date must be on or before the &quot;To&quot; date.
+        </p>
+      ) : null}
+
       {rows.length === 0 ? (
         <div className="rounded-none border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-sm sm:px-10">
-          <p className="text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">No cases yet</p>
+          <p className="text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
+            {fromDate || toDate || statusFilter !== "all" ? "No matching cases" : "No cases yet"}
+          </p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-600">
-            When you submit a document from analysis, it will appear here with live status as
-            processing completes.
+            {fromDate || toDate || statusFilter !== "all"
+              ? "No cases match these filters. Try adjusting the date range or status."
+              : "When you submit a document from analysis, it will appear here with live status as processing completes."}
           </p>
           <Link
             href="/run-analysis"
@@ -305,13 +415,17 @@ export default async function CasesPage({ searchParams }) {
                         <ClientLocalDateTime iso={job.created_at} />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/cases/${job.id}`}
-                          className="inline-flex items-center justify-center rounded-none border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
-                        >
-                          Open
-                          <span className="sr-only"> case {docLabel}</span>
-                        </Link>
+                        {isFailedStatus(job.overall_status) ? (
+                          <CaseRetryButton jobId={job.id} docLabel={docLabel} />
+                        ) : (
+                          <Link
+                            href={`/cases/${job.id}`}
+                            className="inline-flex items-center justify-center rounded-none border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                          >
+                            Open
+                            <span className="sr-only"> case {docLabel}</span>
+                          </Link>
+                        )}
                       </td>
                     </tr>
                   );
