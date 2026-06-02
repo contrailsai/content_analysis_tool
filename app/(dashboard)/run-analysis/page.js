@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { extractHttpsUrls } from "@/lib/urlIngest";
 
 const ACCEPT = "image/*,video/*";
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_BYTES = 100 * 1024 * 1024;
 const POLL_MS = 1500;
 const POLL_MAX_MS = 10 * 60 * 1000;
 
@@ -70,16 +70,17 @@ function statusChipClass(status) {
   return "border-slate-200 bg-white text-slate-700";
 }
 
-/** Snapshot of the file for overlay + multipart parity fields (validated on server). */
-function appendFileWithMetadata(formData, f) {
-  formData.append("file", f, f.name);
-  formData.append("client_file_name", f.name);
-  formData.append("client_mime", f.type || "");
-  formData.append("client_byte_size", String(f.size));
-  formData.append("client_last_modified_ms", String(f.lastModified));
+function fileToInitPayload(f) {
+  const payload = {
+    file_name: f.name,
+    content_type: f.type || "application/octet-stream",
+    byte_size: f.size,
+    last_modified_ms: f.lastModified,
+  };
   if (typeof f.webkitRelativePath === "string" && f.webkitRelativePath) {
-    formData.append("client_relative_path", f.webkitRelativePath);
+    payload.relative_path = f.webkitRelativePath;
   }
+  return payload;
 }
 
 export default function RunAnalysisPage() {
@@ -444,19 +445,52 @@ export default function RunAnalysisPage() {
       return;
     }
     setSubmitting(true);
-    const fd = new FormData();
-    appendFileWithMetadata(fd, file);
     try {
-      const res = await fetch("/api/run-analysis", {
+      const initRes = await fetch("/api/run-analysis/init", {
         method: "POST",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(fileToInitPayload(file)),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error || "Something went wrong.");
+      const initData = await initRes.json().catch(() => ({}));
+      if (!initRes.ok) {
+        setError(initData.error || "Something went wrong.");
         return;
       }
-      const jobId = data.job_id;
+
+      const { job_id: jobId, upload_url, upload_token, required_headers } = initData;
+      if (!jobId || !upload_url || !upload_token || !required_headers) {
+        setError("Invalid upload session from server.");
+        return;
+      }
+
+      setStatus("Uploading…");
+      const putRes = await fetch(upload_url, {
+        method: "PUT",
+        headers: required_headers,
+        body: file,
+      });
+      if (!putRes.ok) {
+        const hint =
+          putRes.status === 403
+            ? " Check IAM allows s3:PutObject on the bucket and that only Content-Type was sent on the PUT."
+            : "";
+        setError(`Upload to storage failed (${putRes.status}).${hint}`);
+        return;
+      }
+
+      setStatus("Queuing…");
+      const completeRes = await fetch("/api/run-analysis/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ job_id: jobId, upload_token }),
+      });
+      const completeData = await completeRes.json().catch(() => ({}));
+      if (!completeRes.ok) {
+        setError(completeData.error || "Something went wrong.");
+        return;
+      }
       if (!jobId || typeof jobId !== "string") {
         setError("Missing job id from server.");
         return;
@@ -479,8 +513,19 @@ export default function RunAnalysisPage() {
       setStatus("Queued…");
       setTrackingJobId(jobId);
       router.refresh();
-    } catch {
-      setError("Network error.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      const likelyCors =
+        msg.includes("Failed to fetch") ||
+        msg.includes("NetworkError") ||
+        msg.includes("Load failed");
+      setError(
+        likelyCors
+          ? "Upload to storage was blocked (often missing S3 CORS for this app origin, e.g. http://localhost:3001). Check the browser console Network tab for the PUT to S3."
+          : msg
+            ? `Upload failed: ${msg}`
+            : "Network error.",
+      );
     } finally {
       setSubmitting(false);
     }

@@ -38,3 +38,6 @@ next-env.d.ts
 
 # local npm cache
 .npm-cache
+
+.env.dev
+.env.prod
